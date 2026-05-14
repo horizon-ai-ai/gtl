@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { assertTradeModuleAccess } from "@/lib/trade";
+import { getInquiryColumnSupport } from "@/lib/trade-quotations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type NotificationItem = {
@@ -111,25 +112,77 @@ export default async function TradeNotificationsPage() {
   if (!session?.user) redirect("/login");
   await assertTradeModuleAccess(session.user.id);
 
+  const columns = await getInquiryColumnSupport();
+  const quotedPrice = columns.quoted_price ? `i."quoted_price"` : `NULL::integer`;
+  const quotationVersion = columns.quotation_version
+    ? `i."quotation_version"`
+    : `CASE
+         WHEN ${columns.quoted_price ? `i."quoted_price" IS NOT NULL` : `false`}
+         THEN 1
+         ELSE 0
+       END`;
+
   const [sent, received, products] = await Promise.all([
-    prisma.inquiry.findMany({
-      where: { buyer_id: session.user.id },
-      include: {
-        product: { select: { name: true } },
-        seller: { select: { email: true, display_name: true, company: { select: { name: true } } } },
-      },
-      orderBy: { updated_at: "desc" },
-      take: 20,
-    }),
-    prisma.inquiry.findMany({
-      where: { seller_id: session.user.id },
-      include: {
-        product: { select: { name: true } },
-        buyer: { select: { email: true, display_name: true, company: { select: { name: true } } } },
-      },
-      orderBy: { updated_at: "desc" },
-      take: 20,
-    }),
+    prisma.$queryRawUnsafe<Array<{
+      id: string;
+      status: string;
+      updated_at: Date;
+      quotation_version: number;
+      product: { name: string };
+      seller: { display_name: string | null; company: { name: string } | null; email: string };
+    }>>(
+      `
+        SELECT
+          i."id",
+          i."status"::text AS "status",
+          i."updated_at",
+          ${quotationVersion} AS "quotation_version",
+          jsonb_build_object('name', p."name") AS "product",
+          jsonb_build_object(
+            'email', s."email",
+            'display_name', s."display_name",
+            'company', CASE WHEN sc."name" IS NULL THEN NULL ELSE jsonb_build_object('name', sc."name") END
+          ) AS "seller"
+        FROM "Inquiry" i
+        INNER JOIN "Product" p ON p."id" = i."product_id"
+        INNER JOIN "User" s ON s."id" = i."seller_id"
+        LEFT JOIN "CompanyProfile" sc ON sc."user_id" = s."id"
+        WHERE i."buyer_id" = $1::uuid
+        ORDER BY i."updated_at" DESC
+        LIMIT 20
+      `,
+      session.user.id,
+    ),
+    prisma.$queryRawUnsafe<Array<{
+      id: string;
+      status: string;
+      updated_at: Date;
+      quotation_version: number;
+      product: { name: string };
+      buyer: { display_name: string | null; company: { name: string } | null; email: string };
+    }>>(
+      `
+        SELECT
+          i."id",
+          i."status"::text AS "status",
+          i."updated_at",
+          ${quotationVersion} AS "quotation_version",
+          jsonb_build_object('name', p."name") AS "product",
+          jsonb_build_object(
+            'email', b."email",
+            'display_name', b."display_name",
+            'company', CASE WHEN bc."name" IS NULL THEN NULL ELSE jsonb_build_object('name', bc."name") END
+          ) AS "buyer"
+        FROM "Inquiry" i
+        INNER JOIN "Product" p ON p."id" = i."product_id"
+        INNER JOIN "User" b ON b."id" = i."buyer_id"
+        LEFT JOIN "CompanyProfile" bc ON bc."user_id" = b."id"
+        WHERE i."seller_id" = $1::uuid
+        ORDER BY i."updated_at" DESC
+        LIMIT 20
+      `,
+      session.user.id,
+    ),
     prisma.product.findMany({
       where: { seller_id: session.user.id, deleted_at: null },
       select: { id: true, name: true, status: true, updated_at: true },

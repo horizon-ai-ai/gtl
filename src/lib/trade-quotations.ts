@@ -20,6 +20,10 @@ export type TradeQuotationRow = {
   updated_at: Date;
 };
 
+export type TradeAdminInquiryRow = TradeQuotationRow & {
+  has_quotation: boolean;
+};
+
 export type InquiryColumnSupport = {
   quoted_price: boolean;
   quoted_quantity: boolean;
@@ -190,6 +194,42 @@ export async function listAdminQuotationRows() {
       WHERE (${q.hasQuotation})
       ORDER BY i."updated_at" DESC
       LIMIT 100
+    `,
+  );
+}
+
+export async function listAdminInquiryRows() {
+  const columns = await getInquiryColumnSupport();
+  const q = quotationSelects(columns);
+  return prisma.$queryRawUnsafe<TradeAdminInquiryRow[]>(
+    `
+      SELECT
+        i."id",
+        i."buyer_id",
+        i."seller_id",
+        i."product_id",
+        p."name" AS "product_name",
+        COALESCE(bc."name", b."display_name", b."email") AS "buyer_name",
+        b."email" AS "buyer_email",
+        COALESCE(sc."name", s."display_name", s."email") AS "seller_name",
+        s."email" AS "seller_email",
+        i."quantity",
+        i."target_price",
+        ${q.quotedPrice} AS "quoted_price",
+        ${q.quotedQuantity} AS "quoted_quantity",
+        ${q.quotationNotes} AS "quotation_notes",
+        ${q.quotationVersion} AS "quotation_version",
+        i."status"::text AS "status",
+        i."updated_at",
+        (${q.hasQuotation}) AS "has_quotation"
+      FROM "Inquiry" i
+      INNER JOIN "Product" p ON p."id" = i."product_id"
+      INNER JOIN "User" b ON b."id" = i."buyer_id"
+      LEFT JOIN "CompanyProfile" bc ON bc."user_id" = b."id"
+      INNER JOIN "User" s ON s."id" = i."seller_id"
+      LEFT JOIN "CompanyProfile" sc ON sc."user_id" = s."id"
+      ORDER BY i."updated_at" DESC
+      LIMIT 150
     `,
   );
 }

@@ -2,6 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  Bell,
+  Boxes,
+  ClipboardList,
+  Globe2,
+  Package2,
+  ScrollText,
+  Search,
+  ShieldCheck,
+  Store,
+} from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -192,6 +203,7 @@ export default function TradePage() {
   const [draftAttributes, setDraftAttributes] = useState<Record<string, string>>({});
   const [draftConfidence, setDraftConfidence] = useState<number | null>(null);
   const [specialVariants, setSpecialVariants] = useState([EMPTY_SPECIAL_VARIANT]);
+  const [openInquiryProductId, setOpenInquiryProductId] = useState<string | null>(null);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [analyzingImages, setAnalyzingImages] = useState(false);
   const [filters, setFilters] = useState<TradeFilters>({ q: "", category: "", hs_code: "" });
@@ -670,6 +682,7 @@ export default function TradePage() {
 
     setStatus("詢價已送出");
     setInquiryForms((prev) => ({ ...prev, [productId]: { ...EMPTY_INQUIRY, product_id: productId } }));
+    setOpenInquiryProductId(null);
     await loadInquiries("sent");
     setTab("inquiries");
   }
@@ -700,46 +713,76 @@ export default function TradePage() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">貿易模組</h1>
-          <p className="text-sm text-neutral-500 mt-1">
-            先落地第一版 Buyer / Seller 工作台：建檔、商品、詢價。
-          </p>
+    <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 lg:px-8">
+      <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-[radial-gradient(circle_at_top_left,_rgba(241,244,255,0.95),_rgba(255,255,255,1)_42%),linear-gradient(135deg,_#ffffff,_#f6f8fb)] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
+        <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.4fr_0.9fr] lg:px-8 lg:py-8">
+          <div className="space-y-5">
+            <div className="inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-neutral-600">
+              <Globe2 className="h-3.5 w-3.5" />
+              Trade Workspace
+            </div>
+            <div className="space-y-3">
+              <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-neutral-950 lg:text-4xl">
+                把商品、詢價、報價與貿易訂單整理成同一個工作台
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-neutral-600 lg:text-base">
+                這裡是 buyer / seller 共用的貿易前台。你可以在市場找商品、快速發送詢價、管理自己的商品，
+                再一路接到 quotation 與訂單生命週期。
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <Link href="/trade/orders" className="trade-quick-link">
+                <Package2 className="h-4 w-4" />
+                <span>貿易訂單</span>
+              </Link>
+              <Link href="/trade/quotations" className="trade-quick-link">
+                <ScrollText className="h-4 w-4" />
+                <span>Seller Quotation</span>
+              </Link>
+              <Link href="/trade/quotations/inbox" className="trade-quick-link">
+                <ClipboardList className="h-4 w-4" />
+                <span>Buyer Quotation</span>
+              </Link>
+              <Link href="/trade/notifications" className="trade-quick-link">
+                <Bell className="h-4 w-4" />
+                <span>通知中心</span>
+              </Link>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div className="rounded-[22px] border border-neutral-200 bg-white/90 p-5">
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">目前角色</div>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold uppercase text-neutral-950">{profile?.role ?? "buyer"}</div>
+                  <div className="text-sm text-neutral-500">Buyer / Seller 權限由貿易檔案設定決定</div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-[22px] border border-neutral-200 bg-neutral-950 p-5 text-white">
+              <div className="grid grid-cols-3 gap-4">
+                <TradeMiniStat label="市場商品" value={String(marketProducts.length)} />
+                <TradeMiniStat label="我的商品" value={String(myProducts.length)} />
+                <TradeMiniStat label="待處理詢價" value={String(receivedInquiries.length)} />
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="flex items-start gap-3">
-          <Link href="/trade/orders" className="rounded-md border px-4 py-2 text-sm hover:bg-neutral-50">
-            貿易訂單
-          </Link>
-          <Link href="/trade/quotations" className="rounded-md border px-4 py-2 text-sm hover:bg-neutral-50">
-            Seller Quotation
-          </Link>
-          <Link href="/trade/quotations/inbox" className="rounded-md border px-4 py-2 text-sm hover:bg-neutral-50">
-            Buyer Quotation
-          </Link>
-          <Link href="/trade/notifications" className="rounded-md border px-4 py-2 text-sm hover:bg-neutral-50">
-            通知中心
-          </Link>
-          {profile && (
-            <Card className="min-w-64">
-              <CardContent className="p-4 text-sm">
-                <div className="text-neutral-500">目前角色</div>
-                <div className="font-medium mt-1 uppercase">{profile.role}</div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
+      </section>
 
       {status && (
-        <div className="rounded-md border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900">
           {status}
         </div>
       )}
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid w-full grid-cols-4 max-w-3xl">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
+        <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm md:grid-cols-4">
           <TabsTrigger value="market">市場</TabsTrigger>
           <TabsTrigger value="products">我的商品</TabsTrigger>
           <TabsTrigger value="inquiries">詢價</TabsTrigger>
@@ -748,12 +791,19 @@ export default function TradePage() {
 
         <TabsContent value="market">
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>搜尋商品</CardTitle>
-                <CardDescription>以關鍵字、類別與 HS code 篩選市場商品。</CardDescription>
+            <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+              <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                    <Search className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>搜尋市場商品</CardTitle>
+                    <CardDescription>以關鍵字、類別與 HS code 篩選供應商商品，快速鎖定可詢價標的。</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-5 p-6">
                 <div className="grid gap-4 md:grid-cols-3">
                   <Field label="關鍵字">
                     <Input
@@ -791,7 +841,7 @@ export default function TradePage() {
                   ))}
                 </datalist>
                 <div className="flex items-center gap-3">
-                  <Button type="button" onClick={() => void loadProducts()}>
+                  <Button type="button" className="min-w-28" onClick={() => void loadProducts()}>
                     套用篩選
                   </Button>
                   <Button
@@ -809,17 +859,17 @@ export default function TradePage() {
             </Card>
 
             <div>
-              <h2 className="text-lg font-semibold">市場商品</h2>
-              <p className="text-sm text-neutral-500 mt-1">
+              <h2 className="text-xl font-semibold tracking-tight text-neutral-950">市場商品</h2>
+              <p className="mt-1 text-sm text-neutral-500">
                 這裡只顯示市場商品，方便 buyer 直接發送詢價；自己的商品請到「我的商品」頁管理。
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-4">
             {loading ? (
-              <Card><CardContent className="p-6 text-neutral-500">載入中...</CardContent></Card>
+              <Card className="rounded-[24px]"><CardContent className="p-6 text-neutral-500">載入中...</CardContent></Card>
             ) : marketProducts.length === 0 ? (
-              <Card className="md:col-span-2">
+              <Card className="rounded-[24px]">
                 <CardContent className="p-12 text-center text-neutral-500">
                   尚無已上架商品。先建立 Seller 檔案並新增第一個商品。
                 </CardContent>
@@ -828,80 +878,121 @@ export default function TradePage() {
               marketProducts.map((product) => {
                 const inquiryForm = getInquiryForm(product.id);
                 return (
-                  <Card key={product.id}>
-                    <CardHeader>
-                      <CardTitle>{product.name}</CardTitle>
-                      <CardDescription>
-                        <Link
-                          href={`/trade/sellers/${product.seller.id}`}
-                          className="underline-offset-4 hover:underline"
-                        >
-                          {product.seller.company?.name ?? product.seller.display_name ?? "未命名賣家"}
-                        </Link>
-                        {" · "}
-                        {product.category}
-                        {product.hs_code ? ` · HS ${product.hs_code}` : ""}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <ProductImagePreview
-                        images={product.images}
-                        name={product.name}
-                        className="h-48 w-full"
-                      />
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <Info label="價格">
-                          {formatPrice(product.price_min, product.price_max, product.currency)}
-                        </Info>
-                        <Info label="MOQ">
-                          {product.moq} {product.unit}
-                        </Info>
-                        <Info label="產地">{product.origin_country ?? "未填寫"}</Info>
-                        <Info label="狀態">{product.status}</Info>
+                  <Card key={product.id} className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+                    <div className="grid gap-0 lg:grid-cols-[260px_minmax(0,1fr)]">
+                      <div className="border-b border-neutral-200 bg-neutral-100/70 lg:border-b-0 lg:border-r">
+                        <ProductImagePreview
+                          images={product.images}
+                          name={product.name}
+                          className="h-full min-h-[220px] w-full rounded-none border-0"
+                        />
                       </div>
-                      {product.description && (
-                        <p className="text-sm whitespace-pre-wrap text-neutral-700">{product.description}</p>
-                      )}
-                      <div className="flex items-center gap-3">
-                        <Link href={`/trade/products/${product.id}`}>
-                          <Button size="sm" variant="outline">商品詳情</Button>
-                        </Link>
-                        <Link href={`/trade/sellers/${product.seller.id}`}>
-                          <Button size="sm" variant="ghost">Seller 詳情</Button>
-                        </Link>
-                      </div>
-
-                      <div className="space-y-3 rounded-md border border-neutral-200 p-4">
-                        <div className="font-medium text-sm">快速詢價</div>
-                        <div className="grid gap-3 md:grid-cols-2">
-                          <Field label="需求數量">
-                            <Input
-                              value={inquiryForm.quantity}
-                              onChange={(e) => updateInquiryForm(product.id, { quantity: e.target.value })}
-                            />
-                          </Field>
-                          <Field label="目標單價">
-                            <Input
-                              value={inquiryForm.target_price}
-                              onChange={(e) => updateInquiryForm(product.id, { target_price: e.target.value })}
-                              placeholder={`例如 ${product.currency}`}
-                            />
-                          </Field>
-                          <Field label="交貨條件">
-                            <Input
-                              value={inquiryForm.delivery_terms}
-                              onChange={(e) => updateInquiryForm(product.id, { delivery_terms: e.target.value })}
-                            />
-                          </Field>
-                          <Field label="目的港">
-                            <Input
-                              value={inquiryForm.port_of_destination}
-                              onChange={(e) =>
-                                updateInquiryForm(product.id, { port_of_destination: e.target.value })
-                              }
-                            />
-                          </Field>
+                      <div className="space-y-4 p-5 lg:p-6">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1 space-y-3">
+                            <div className="flex flex-wrap gap-2">
+                              {product.category ? (
+                                <span className="rounded-full bg-neutral-950 px-3 py-1 text-xs font-medium text-white">
+                                  {product.category}
+                                </span>
+                              ) : null}
+                              {product.hs_code ? (
+                                <span className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs font-medium text-neutral-700">
+                                  HS {product.hs_code}
+                                </span>
+                              ) : null}
+                              <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-medium text-neutral-500">
+                                {product.status}
+                              </span>
+                            </div>
+                            <div>
+                              <h3 className="text-xl font-semibold tracking-tight text-neutral-950">{product.name}</h3>
+                              <div className="mt-2 text-sm text-neutral-500">
+                                <Link
+                                  href={`/trade/sellers/${product.seller.id}`}
+                                  className="font-medium text-neutral-700 underline-offset-4 hover:underline"
+                                >
+                                  {product.seller.company?.name ?? product.seller.display_name ?? "未命名賣家"}
+                                </Link>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-right">
+                            <div className="text-xs uppercase tracking-[0.16em] text-neutral-500">價格</div>
+                            <div className="mt-2 text-lg font-semibold text-neutral-950">
+                              {formatPrice(product.price_min, product.price_max, product.currency)}
+                            </div>
+                          </div>
                         </div>
+
+                        <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
+                          <Info label="MOQ">{product.moq} {product.unit}</Info>
+                          <Info label="產地">{product.origin_country ?? "未填寫"}</Info>
+                          <Info label="供應狀態">{product.status}</Info>
+                          <Info label="Seller">{product.seller.company?.name ?? product.seller.display_name ?? "未命名"}</Info>
+                        </div>
+                        {product.description && (
+                          <p className="line-clamp-3 rounded-2xl bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-700">{product.description}</p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Link href={`/trade/products/${product.id}`}>
+                            <Button size="sm" variant="outline">商品詳情</Button>
+                          </Link>
+                          <Link href={`/trade/sellers/${product.seller.id}`}>
+                            <Button size="sm" variant="ghost">Seller 詳情</Button>
+                          </Link>
+                          <Button
+                            size="sm"
+                            onClick={() =>
+                              setOpenInquiryProductId((current) => (current === product.id ? null : product.id))
+                            }
+                          >
+                            {openInquiryProductId === product.id ? "收起詢價" : "我要詢價"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    {openInquiryProductId === product.id ? (
+                    <CardContent className="border-t border-neutral-200 bg-[linear-gradient(180deg,#ffffff,#f8fafc)] p-5 lg:p-6">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div>
+                          <div className="text-base font-semibold text-neutral-950">快速詢價</div>
+                          <div className="text-sm text-neutral-500">直接填入需求與條件，送到 seller 的 quotation 工作台。</div>
+                        </div>
+                        <div className="hidden rounded-2xl bg-white px-3 py-2 text-xs text-neutral-500 shadow-sm md:block">
+                          詢價後可由 seller 產出制式 quotation
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <Field label="需求數量">
+                          <Input
+                            value={inquiryForm.quantity}
+                            onChange={(e) => updateInquiryForm(product.id, { quantity: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="目標單價">
+                          <Input
+                            value={inquiryForm.target_price}
+                            onChange={(e) => updateInquiryForm(product.id, { target_price: e.target.value })}
+                            placeholder={`例如 ${product.currency}`}
+                          />
+                        </Field>
+                        <Field label="交貨條件">
+                          <Input
+                            value={inquiryForm.delivery_terms}
+                            onChange={(e) => updateInquiryForm(product.id, { delivery_terms: e.target.value })}
+                          />
+                        </Field>
+                        <Field label="目的港">
+                          <Input
+                            value={inquiryForm.port_of_destination}
+                            onChange={(e) =>
+                              updateInquiryForm(product.id, { port_of_destination: e.target.value })
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <div className="mt-3 grid gap-3">
                         <Field label="付款條件">
                           <Input
                             value={inquiryForm.payment_terms}
@@ -912,11 +1003,14 @@ export default function TradePage() {
                           <textarea
                             value={inquiryForm.notes}
                             onChange={(e) => updateInquiryForm(product.id, { notes: e.target.value })}
-                            className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                            className="min-h-24 w-full rounded-2xl border border-neutral-300 bg-white px-3 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
                             placeholder="例如：希望 30 天內交貨，需 CE 認證。"
                           />
                         </Field>
+                      </div>
+                      <div className="mt-4 flex justify-end">
                         <Button
+                          className="min-w-32"
                           onClick={() => void submitInquiry(product.id)}
                           disabled={submittingInquiryId === product.id}
                         >
@@ -924,6 +1018,7 @@ export default function TradePage() {
                         </Button>
                       </div>
                     </CardContent>
+                    ) : null}
                   </Card>
                 );
               })
@@ -934,32 +1029,47 @@ export default function TradePage() {
 
         <TabsContent value="products">
           <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>我的商品</CardTitle>
-                <CardDescription>Seller / Both 角色可建立並管理商品。</CardDescription>
+            <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+              <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                    <Boxes className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>我的商品庫</CardTitle>
+                    <CardDescription>Seller / Both 角色可建立商品、維護圖像與規格，作為後續詢價與 quotation 的來源。</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-4 p-5 lg:p-6">
                 {myProducts.length === 0 ? (
-                  <div className="rounded-md border border-dashed p-8 text-center text-sm text-neutral-500">
+                  <div className="rounded-2xl border border-dashed p-10 text-center text-sm text-neutral-500">
                     尚無商品
                   </div>
                 ) : (
                   myProducts.map((product) => (
-                    <div key={product.id} className="rounded-md border p-4">
-                      <div className="flex items-start justify-between gap-4">
+                    <div key={product.id} className="rounded-[22px] border border-neutral-200 bg-white p-4 shadow-[0_16px_42px_-36px_rgba(15,23,42,0.35)]">
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div className="min-w-0 flex-1">
                           <ProductImagePreview
                             images={product.images}
                             name={product.name}
-                            className="mb-3 h-40 w-full max-w-sm"
+                            className="mb-4 h-48 w-full max-w-xl"
                           />
-                          <div className="font-medium">{product.name}</div>
-                          <div className="text-sm text-neutral-500 mt-1">
-                            {product.category} · {formatPrice(product.price_min, product.price_max, product.currency)}
+                          <div className="flex flex-wrap gap-2">
+                            {product.category ? (
+                              <span className="rounded-full bg-neutral-950 px-3 py-1 text-xs font-medium text-white">{product.category}</span>
+                            ) : null}
+                            <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-medium text-neutral-500">
+                              {product.status}
+                            </span>
+                          </div>
+                          <div className="mt-3 text-xl font-semibold text-neutral-950">{product.name}</div>
+                          <div className="mt-2 text-sm text-neutral-500">
+                            {formatPrice(product.price_min, product.price_max, product.currency)}
                           </div>
                           {product.description && (
-                            <p className="mt-2 text-sm text-neutral-700 whitespace-pre-wrap">
+                            <p className="mt-3 rounded-2xl bg-neutral-50 px-4 py-3 text-sm leading-6 text-neutral-700 whitespace-pre-wrap">
                               {product.description}
                             </p>
                           )}
@@ -970,14 +1080,13 @@ export default function TradePage() {
                                   key={`${product.id}-image-${index}`}
                                   src={image}
                                   alt={product.name}
-                                  className="h-16 w-16 rounded-md border object-cover"
+                                  className="h-16 w-16 rounded-xl border border-neutral-200 object-cover"
                                 />
                               ))}
                             </div>
                           ) : null}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="rounded bg-neutral-100 px-2 py-1 text-xs">{product.status}</span>
+                        <div className="flex flex-wrap items-center gap-2 xl:max-w-[220px] xl:justify-end">
                           <Button type="button" size="sm" variant="outline" onClick={() => startEditProduct(product)}>
                             編輯
                           </Button>
@@ -990,6 +1099,9 @@ export default function TradePage() {
                           >
                             {deletingProductId === product.id ? "下架中..." : "下架"}
                           </Button>
+                          <Link href={`/trade/products/${product.id}`}>
+                            <Button type="button" size="sm" variant="ghost">查看詳情</Button>
+                          </Link>
                         </div>
                       </div>
                     </div>
@@ -998,16 +1110,23 @@ export default function TradePage() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>{editingProductId ? "編輯商品" : "新增商品"}</CardTitle>
-                <CardDescription>
+            <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+              <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                    <Store className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>{editingProductId ? "編輯商品" : "新增商品"}</CardTitle>
+                    <CardDescription>
                   目前已支援真實檔案上傳；若有設定 `ASSET_BASE_URL`，會自動生成 CDN URL。
-                </CardDescription>
+                    </CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-5 lg:p-6">
                 {!canSell ? (
-                  <div className="rounded-md border border-dashed p-8 text-sm text-neutral-500">
+                  <div className="rounded-2xl border border-dashed p-8 text-sm text-neutral-500">
                     先到「貿易檔案」把角色設定成 Seller 或 Both，才能新增商品。
                   </div>
                 ) : (
@@ -1462,7 +1581,13 @@ export default function TradePage() {
         </TabsContent>
 
         <TabsContent value="inquiries">
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-xl font-semibold tracking-tight text-neutral-950">詢價工作台</h2>
+              <p className="mt-1 text-sm text-neutral-500">左邊查看你送出的詢價，右邊處理 seller 收到的詢價與報價回覆。</p>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <InquiryColumn
               title="我送出的詢價"
               items={sentInquiries}
@@ -1493,14 +1618,21 @@ export default function TradePage() {
         </TabsContent>
 
         <TabsContent value="profile">
-          <Card className="max-w-3xl">
-            <CardHeader>
-              <CardTitle>貿易檔案</CardTitle>
-              <CardDescription>
+          <Card className="max-w-4xl overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+            <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle>貿易檔案</CardTitle>
+                  <CardDescription>
                 這是 Trade module 的啟動入口。後續可擴充 Admin 審核、風控與完整公司資料。
-              </CardDescription>
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-5 lg:p-6">
               <form onSubmit={saveProfile} className="space-y-4">
                 <Field label="角色">
                   <select
@@ -1554,7 +1686,7 @@ export default function TradePage() {
                     />
                   </Field>
                 </div>
-                <Button type="submit" disabled={savingProfile}>
+                <Button type="submit" className="min-w-32" disabled={savingProfile}>
                   {savingProfile ? "儲存中..." : "儲存檔案"}
                 </Button>
               </form>
@@ -1569,7 +1701,7 @@ export default function TradePage() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">{label}</Label>
       {children}
     </div>
   );
@@ -1577,9 +1709,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <div className="text-xs text-neutral-500">{label}</div>
-      <div className="mt-1 font-medium">{children}</div>
+    <div className="rounded-2xl border border-neutral-200 bg-white px-3 py-3">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-400">{label}</div>
+      <div className="mt-1 text-sm font-medium text-neutral-900">{children}</div>
+    </div>
+  );
+}
+
+function TradeMiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-white/50">{label}</div>
+      <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
     </div>
   );
 }
@@ -1615,58 +1756,65 @@ function InquiryColumn({
   onSaveQuotation?: (inquiry: Inquiry) => void;
 }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>{side === "buyer" ? "Buyer 視角" : "Seller 視角"}</CardDescription>
+    <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+      <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+            {side === "buyer" ? <ClipboardList className="h-5 w-5" /> : <ScrollText className="h-5 w-5" />}
+          </div>
+          <div>
+            <CardTitle>{title}</CardTitle>
+            <CardDescription>{side === "buyer" ? "Buyer 視角" : "Seller 視角"}</CardDescription>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4 p-5 lg:p-6">
         {items.length === 0 ? (
-          <div className="rounded-md border border-dashed p-8 text-center text-sm text-neutral-500">
+          <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-neutral-500">
             尚無資料
           </div>
         ) : (
           items.map((item) => (
-            <div key={item.id} className="rounded-md border p-4 text-sm">
+            <div key={item.id} className="rounded-[22px] border border-neutral-200 bg-white p-4 text-sm shadow-[0_14px_38px_-34px_rgba(15,23,42,0.35)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-medium">{item.product.name}</div>
+                  <div className="text-lg font-semibold text-neutral-950">{item.product.name}</div>
                   <div className="mt-1 text-neutral-500">
                     {side === "buyer"
                       ? `賣家：${item.seller.company?.name ?? item.seller.display_name ?? item.seller.email}`
                       : `買家：${item.buyer.company?.name ?? item.buyer.display_name ?? item.buyer.email}`}
                   </div>
                 </div>
-                <span className="rounded bg-neutral-100 px-2 py-1 text-xs">{item.status}</span>
+                <span className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1 text-xs font-medium text-neutral-600">{item.status}</span>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-4 grid grid-cols-2 gap-3">
                 <Info label="數量">{item.quantity}</Info>
                 <Info label="目標價">{item.target_price ?? "未填寫"}</Info>
                 <Info label="付款條件">{item.payment_terms ?? "未填寫"}</Info>
                 <Info label="目的港">{item.port_of_destination ?? "未填寫"}</Info>
               </div>
               {(item.quoted_price != null || item.quoted_quantity != null || item.quotation_notes) ? (
-                <div className="mt-3 rounded-md border bg-neutral-50 p-3 text-sm">
-                  <div className="font-medium">目前報價</div>
+                <div className="mt-4 rounded-2xl border border-neutral-200 bg-[linear-gradient(180deg,#fafafa,#ffffff)] p-4 text-sm">
+                  <div className="font-medium text-neutral-950">目前報價</div>
                   <div className="mt-2 grid grid-cols-2 gap-3">
                     <Info label="報價數量">{item.quoted_quantity ?? item.quantity}</Info>
                     <Info label="報價單價">{item.quoted_price ?? "未填寫"}</Info>
                   </div>
                   {item.quotation_notes ? (
-                    <div className="mt-2 whitespace-pre-wrap text-neutral-700">{item.quotation_notes}</div>
+                    <div className="mt-3 rounded-xl bg-white px-3 py-3 whitespace-pre-wrap text-neutral-700">{item.quotation_notes}</div>
                   ) : null}
                   <div className="mt-2 text-xs text-neutral-500">quotation v{item.quotation_version}</div>
                 </div>
               ) : null}
               {item.quotation_history && item.quotation_history.length > 0 ? (
-                <div className="mt-3 rounded-md border p-3 text-sm">
-                  <div className="font-medium">Quotation History</div>
+                <div className="mt-4 rounded-2xl border border-neutral-200 p-4 text-sm">
+                  <div className="font-medium text-neutral-950">Quotation History</div>
                   <div className="mt-2 space-y-2">
                     {item.quotation_history
                       .slice()
                       .reverse()
                       .map((history) => (
-                        <div key={`${item.id}-qv-${history.version}`} className="rounded bg-neutral-50 p-3">
+                        <div key={`${item.id}-qv-${history.version}`} className="rounded-xl bg-neutral-50 p-3">
                           <div className="text-xs text-neutral-500">
                             v{history.version} · {new Date(history.updated_at).toLocaleString()}
                           </div>
@@ -1681,19 +1829,19 @@ function InquiryColumn({
                   </div>
                 </div>
               ) : null}
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-4 grid grid-cols-2 gap-3">
                 <Info label="建立時間">{new Date(item.created_at).toLocaleDateString()}</Info>
                 <Info label="有效期限">{new Date(item.expires_at).toLocaleDateString()}</Info>
               </div>
               {item.notes ? (
-                <div className="mt-3 rounded-md border bg-neutral-50 p-3 text-sm whitespace-pre-wrap text-neutral-700">
+                <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm whitespace-pre-wrap text-neutral-700">
                   {item.notes}
                 </div>
               ) : null}
               {side === "seller" ? (
                 <div className="mt-4 flex items-center gap-3">
-                  <div className="w-full space-y-3 rounded-md border p-3">
-                    <div className="font-medium">建立 / 更新報價</div>
+                  <div className="w-full space-y-3 rounded-2xl border border-neutral-200 bg-[linear-gradient(180deg,#ffffff,#f8fafc)] p-4">
+                    <div className="font-medium text-neutral-950">建立 / 更新報價</div>
                     <div className="grid gap-3 md:grid-cols-2">
                       <div>
                         <div className="mb-1 text-xs text-neutral-500">報價數量</div>
@@ -1715,7 +1863,7 @@ function InquiryColumn({
                       <textarea
                         value={getQuotationDraft?.(item).quotation_notes ?? ""}
                         onChange={(e) => onUpdateQuotationDraft?.(item.id, { quotation_notes: e.target.value })}
-                        className="min-h-24 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
+                        className="min-h-24 w-full rounded-2xl border border-neutral-300 bg-white px-3 py-3 text-sm"
                       />
                     </div>
                     <Button
@@ -1868,7 +2016,7 @@ function ProductImagePreview({
   if (!image) {
     return (
       <div
-        className={`flex items-center justify-center rounded-lg border border-dashed border-neutral-300 bg-neutral-50 text-sm text-neutral-400 ${className}`}
+        className={`flex items-center justify-center rounded-[24px] border border-dashed border-neutral-300 bg-[linear-gradient(135deg,#fafafa,#f1f5f9)] text-sm text-neutral-400 ${className}`}
       >
         尚無商品圖
       </div>
@@ -1879,7 +2027,7 @@ function ProductImagePreview({
     <img
       src={image}
       alt={name}
-      className={`rounded-lg border object-cover ${className}`}
+      className={`rounded-[24px] border border-neutral-200 object-cover ${className}`}
     />
   );
 }
