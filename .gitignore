@@ -11,6 +11,12 @@
 
 # next.js
 /.next/
+/.next-build/
+/.next-dev/
+/.next-admin-dev/
+/.next-user-dev/
+/.next-user-3001/
+/.next-admin-3001/
 /out/
 
 # production
@@ -26,7 +32,16 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
+.env
+.env.*
 .env*.local
+
+# local oauth / secrets
+client_secret_*.json
+
+# local temp work dirs
+/tmp_wbs/
+/tmp_wbs_excel/
 
 # vercel
 .vercel
@@ -34,3 +49,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma

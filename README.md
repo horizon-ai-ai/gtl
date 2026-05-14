@@ -1,36 +1,171 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Marketing AI Platform
 
-## Getting Started
+台灣市場導向的 Marketing AI SaaS。  
+以 AI 對話為入口，延伸到建站、訂單、B2B 貿易、RAG 客服、GA4 分析與 admin 營運後台。
 
-First, run the development server:
+## 專案內容
+
+- `user portal`
+  - chat
+  - billing
+  - orders
+  - sites
+  - trade
+  - support
+  - analytics / integrations
+- `admin portal`
+  - users
+  - orders
+  - support
+  - trade ops
+  - kb
+  - admin copilot
+  - audit / announcements
+
+## 主要文件
+
+完整 spec 在 [`docs/`](./docs/)：
+
+- [`docs/00_PRD_master.md`](./docs/00_PRD_master.md)
+- [`docs/15_product_spec_overview.md`](./docs/15_product_spec_overview.md)
+- [`docs/16_engineering_spec_overview.md`](./docs/16_engineering_spec_overview.md)
+
+模組規格：
+
+- Auth: [`docs/01_spec_auth.md`](./docs/01_spec_auth.md)
+- Chat: [`docs/02_spec_chat.md`](./docs/02_spec_chat.md)
+- Billing: [`docs/03_spec_billing.md`](./docs/03_spec_billing.md)
+- Orders: [`docs/04_spec_order.md`](./docs/04_spec_order.md)
+- Page Builder: [`docs/05_spec_pagebuilder.md`](./docs/05_spec_pagebuilder.md)
+- Trade: [`docs/06_spec_trade.md`](./docs/06_spec_trade.md)
+- RAG / Support: [`docs/07_spec_rag_support.md`](./docs/07_spec_rag_support.md)
+- Admin: [`docs/08_spec_admin.md`](./docs/08_spec_admin.md)
+- DB Schema: [`docs/09_spec_db_schema.md`](./docs/09_spec_db_schema.md)
+- API: [`docs/10_spec_api.md`](./docs/10_spec_api.md)
+- Analytics Integration: [`docs/13_spec_analytics_integration.md`](./docs/13_spec_analytics_integration.md)
+
+## 技術棧
+
+- Next.js 14 App Router
+- React 18
+- TypeScript
+- Tailwind CSS
+- Prisma + PostgreSQL
+- pgvector
+- NextAuth / Auth.js
+- Resend
+- Google Analytics Data/Admin API
+- OpenAI-compatible LLM provider（目前可接 Moonshot / Kimi 類 API）
+
+## 本地啟動
+
+### 1. 安裝依賴
+
+```bash
+npm install
+```
+
+### 2. 準備環境變數
+
+```bash
+cp .env.example .env
+```
+
+再依需求補上金鑰與 OAuth 設定。
+
+### 3. 啟動 PostgreSQL
+
+範例：
+
+```bash
+docker run -d --name marketing-ai-pg \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=marketing_ai_platform \
+  -p 5433:5432 \
+  pgvector/pgvector:pg15
+```
+
+### 4. 初始化資料
+
+```bash
+npm run db:seed
+```
+
+### 5. 啟動 portals
+
+User portal:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- 預設：`http://localhost:3000`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Admin portal:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run admin:dev
+```
 
-## Learn More
+- 預設：`http://localhost:3001`
 
-To learn more about Next.js, take a look at the following resources:
+## 重要環境變數
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+見 [`.env.example`](./.env.example)。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+常用項目：
 
-## Deploy on Vercel
+- `DATABASE_URL`
+- `NEXTAUTH_SECRET`
+- `FLEXION_API_BASE_URL`
+- `FLEXION_API_KEY`
+- `FLEXION_MODEL`
+- `RESEND_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+- `GA_TOKEN_ENCRYPTION_SALT`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 目前功能狀態
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+已可用：
+
+- 個人 / 公司註冊
+- 統編查詢與帶入公司資料
+- AI Chat + SSE streaming
+- Billing 基本方案切換
+- Orders 基本管理
+- Trade 商品、詢價、quotation、trade lifecycle
+- Support ticket + RAG 問答
+- Sites 建立、預覽、發佈
+- GA4 integrations / dashboard 基礎
+- Admin Portal / Admin Copilot
+
+尚未完全 production-ready：
+
+- 真付款金流
+- email verification / reset password
+- RAG 完整向量 pipeline
+- Trade 完整 quotation entity / notification center
+- Site Builder 視覺化 editor / domain verification
+
+## 開發注意事項
+
+- 不要提交 `.env`
+- 不要提交 `client_secret_*.json`
+- 不要提交 `.next*` 產物
+- 本專案有 user/admin 多個本地 portal；請使用既定 scripts 啟動
+- 若本地 DB schema 與 `schema.prisma` 不同步，部分 trade / quotation 路徑會走相容 fallback
+
+## GitHub Push 前建議檢查
+
+```bash
+git status
+npm run typecheck
+```
+
+若要公開 push，請先確認：
+
+- `.env` 未被追蹤
+- Google / LLM / OAuth secrets 未進 repo
+- 本地暫存資料夾未被追蹤
