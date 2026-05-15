@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { getInquiryColumnSupport } from "@/lib/trade-quotations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -110,7 +110,7 @@ function buildNotifications(params: {
 export default async function TradeNotificationsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  await assertTradeModuleAccess(session.user.id);
+  await assertVerifiedTradeProfile(session.user.id);
 
   const columns = await getInquiryColumnSupport();
   const quotedPrice = columns.quoted_price ? `i."quoted_price"` : `NULL::integer`;

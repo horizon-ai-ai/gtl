@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -13,7 +13,7 @@ export default async function TradeBuyerDetailPage({
 }) {
   const session = await auth();
   if (!session?.user) notFound();
-  await assertTradeModuleAccess(session.user.id);
+  await assertVerifiedTradeProfile(session.user.id);
 
   const buyer = await prisma.user.findFirst({
     where: {

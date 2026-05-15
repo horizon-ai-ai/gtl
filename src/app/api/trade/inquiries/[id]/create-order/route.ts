@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertTradeModuleAccess, assertVerifiedTradeProfile } from "@/lib/trade";
 import { generateOrderNo } from "@/lib/utils";
 
 export async function POST(_: Request, { params }: { params: { id: string } }) {
@@ -10,7 +10,7 @@ export async function POST(_: Request, { params }: { params: { id: string } }) {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
     if (session.user.role !== "admin" && session.user.role !== "super_admin") {
-      await assertTradeModuleAccess(session.user.id);
+      await assertVerifiedTradeProfile(session.user.id);
     }
 
     const inquiry = await prisma.inquiry.findFirst({

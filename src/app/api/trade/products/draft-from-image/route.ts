@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { prisma } from "@/lib/db";
 import { saveTradeFiles } from "@/lib/trade-assets";
 import { createTradeProductDraftFromImages } from "@/lib/trade-vision";
@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const tradeProfile = await prisma.tradeProfile.findUnique({
       where: { user_id: session.user.id },

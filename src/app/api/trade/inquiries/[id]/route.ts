@@ -2,7 +2,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { sendEmail } from "@/lib/notify";
 
 const updateSchema = z.object({
@@ -16,7 +16,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const body = updateSchema.parse(await req.json());
     const inquiry = await prisma.inquiry.findFirst({

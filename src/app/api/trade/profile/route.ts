@@ -38,9 +38,13 @@ export async function POST(req: Request) {
     const body = profileSchema.parse(await req.json());
     const profile = await prisma.tradeProfile.upsert({
       where: { user_id: session.user.id },
-      update: body,
+      update: {
+        ...body,
+        verified: false,
+      },
       create: {
         user_id: session.user.id,
+        verified: false,
         ...body,
       },
     });

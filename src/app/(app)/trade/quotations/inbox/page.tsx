@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { listBuyerQuotationRows } from "@/lib/trade-quotations";
 import { Card } from "@/components/ui/card";
 
 export default async function TradeQuotationInboxPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  await assertTradeModuleAccess(session.user.id);
+  await assertVerifiedTradeProfile(session.user.id);
 
   const inquiries = await listBuyerQuotationRows(session.user.id);
 

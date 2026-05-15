@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
 import { saveTradeFiles } from "@/lib/trade-assets";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const product = await prisma.product.findFirst({
       where: { id: params.id, seller_id: session.user.id, deleted_at: null },

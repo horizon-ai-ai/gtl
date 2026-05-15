@@ -2,8 +2,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ApiError, fail, handleError, ok } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
-import { sendEmail } from "@/lib/notify";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { getInquiryColumnSupport } from "@/lib/trade-quotations";
 
 const createInquirySchema = z.object({
@@ -104,7 +103,7 @@ export async function GET(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const url = new URL(req.url);
     const mode = url.searchParams.get("mode") ?? "sent";
@@ -123,7 +122,7 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const body = createInquirySchema.parse(await req.json());
     const product = await prisma.product.findFirst({

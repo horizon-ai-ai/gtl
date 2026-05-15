@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertVerifiedTradeProfile } from "@/lib/trade";
 
 function formatPrice(min: number | null, max: number | null, currency: string) {
   if (min == null && max == null) return "待議";
@@ -20,7 +20,7 @@ export default async function TradeSellerDetailPage({
 }) {
   const session = await auth();
   if (!session?.user) notFound();
-  await assertTradeModuleAccess(session.user.id);
+  await assertVerifiedTradeProfile(session.user.id);
 
   const seller = await prisma.user.findFirst({
     where: {

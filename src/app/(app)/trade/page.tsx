@@ -28,10 +28,14 @@ type TradeProfile = {
   target_markets: string[];
   budget_range: string | null;
   capacity: string | null;
+  verified?: boolean;
 } | null;
 
 type TradeAccess = {
   allowed: boolean;
+  profile_exists: boolean;
+  profile_verified: boolean;
+  reason: "plan_locked" | "profile_missing" | "profile_pending_review" | "ready";
 };
 
 type TradeFilters = {
@@ -155,7 +159,7 @@ const EMPTY_PRODUCT = {
   food_registration_no: "",
   commission_rate: "",
   certifications: "",
-  status: "published",
+  status: "draft",
 };
 
 const EMPTY_SPECIAL_VARIANT = {
@@ -177,6 +181,8 @@ const EMPTY_INQUIRY = {
 
 export default function TradePage() {
   const [tab, setTab] = useState("market");
+  const [productSubTab, setProductSubTab] = useState<"list" | "form">("list");
+  const [inquirySubTab, setInquirySubTab] = useState<"sent" | "received">("sent");
   const [access, setAccess] = useState<TradeAccess | null>(null);
   const [profile, setProfile] = useState<TradeProfile>(null);
   const [catalog, setCatalog] = useState<TradeCatalog>({ categories: [], hs_codes: [] });
@@ -212,14 +218,18 @@ export default function TradePage() {
     void (async () => {
       setLoading(true);
       const nextAccess = await loadAccess();
+      if (nextAccess.reason !== "plan_locked") {
+        await loadProfile();
+      }
       if (nextAccess.allowed) {
         await Promise.all([
-          loadProfile(),
           loadCatalog(),
           loadProducts(),
           loadInquiries("sent"),
           loadInquiries("received"),
         ]);
+      } else if (nextAccess.reason === "profile_missing" || nextAccess.reason === "profile_pending_review") {
+        setTab("profile");
       }
       setLoading(false);
     })();
@@ -228,7 +238,8 @@ export default function TradePage() {
   async function loadAccess() {
     const res = await fetch("/api/trade/access");
     const json = await res.json();
-    const nextAccess = (json.data ?? { allowed: false }) as TradeAccess;
+    const nextAccess = (json.data ??
+      { allowed: false, profile_exists: false, profile_verified: false, reason: "plan_locked" }) as TradeAccess;
     setAccess(nextAccess);
     return nextAccess;
   }
@@ -305,7 +316,9 @@ export default function TradePage() {
     }
 
     setProfile(json.data);
-    setStatus("貿易檔案已更新");
+    await loadAccess();
+    setTab("profile");
+    setStatus("貿易檔案已送出，待 admin 審核身份後才會開放商品與詢價功能");
   }
 
   async function createProduct(e: React.FormEvent) {
@@ -396,9 +409,11 @@ export default function TradePage() {
     setStatus(editingProductId ? "商品已更新" : "商品已建立");
     await loadProducts();
     setTab("products");
+    setProductSubTab("list");
   }
 
   function startEditProduct(product: Product) {
+    setProductSubTab("form");
     setEditingProductId(product.id);
     setProductForm({
       name: product.name,
@@ -448,6 +463,7 @@ export default function TradePage() {
 
   function cancelEditProduct() {
     setEditingProductId(null);
+    setProductSubTab("list");
     setProductForm(EMPTY_PRODUCT);
     setProductFiles([]);
     setDraftImages([]);
@@ -688,8 +704,9 @@ export default function TradePage() {
   }
 
   const canSell = profile?.role === "seller" || profile?.role === "both";
+  const profileGateReason = access?.reason;
 
-  if (!loading && access && !access.allowed) {
+  if (!loading && access && access.reason === "plan_locked") {
     return (
       <div className="p-8 max-w-4xl mx-auto">
         <Card>
@@ -732,22 +749,45 @@ export default function TradePage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Link href="/trade/orders" className="trade-quick-link">
-                <Package2 className="h-4 w-4" />
-                <span>貿易訂單</span>
-              </Link>
-              <Link href="/trade/quotations" className="trade-quick-link">
-                <ScrollText className="h-4 w-4" />
-                <span>Seller Quotation</span>
-              </Link>
-              <Link href="/trade/quotations/inbox" className="trade-quick-link">
-                <ClipboardList className="h-4 w-4" />
-                <span>Buyer Quotation</span>
-              </Link>
-              <Link href="/trade/notifications" className="trade-quick-link">
-                <Bell className="h-4 w-4" />
-                <span>通知中心</span>
-              </Link>
+              {access?.allowed ? (
+                <>
+                  <Link href="/trade/orders" className="trade-quick-link">
+                    <Package2 className="h-4 w-4" />
+                    <span>貿易訂單</span>
+                  </Link>
+                  <Link href="/trade/quotations" className="trade-quick-link">
+                    <ScrollText className="h-4 w-4" />
+                    <span>Seller Quotation</span>
+                  </Link>
+                  <Link href="/trade/quotations/inbox" className="trade-quick-link">
+                    <ClipboardList className="h-4 w-4" />
+                    <span>Buyer Quotation</span>
+                  </Link>
+                  <Link href="/trade/notifications" className="trade-quick-link">
+                    <Bell className="h-4 w-4" />
+                    <span>通知中心</span>
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <div className="trade-quick-link cursor-not-allowed opacity-55">
+                    <Package2 className="h-4 w-4" />
+                    <span>貿易訂單</span>
+                  </div>
+                  <div className="trade-quick-link cursor-not-allowed opacity-55">
+                    <ScrollText className="h-4 w-4" />
+                    <span>Seller Quotation</span>
+                  </div>
+                  <div className="trade-quick-link cursor-not-allowed opacity-55">
+                    <ClipboardList className="h-4 w-4" />
+                    <span>Buyer Quotation</span>
+                  </div>
+                  <div className="trade-quick-link cursor-not-allowed opacity-55">
+                    <Bell className="h-4 w-4" />
+                    <span>通知中心</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -781,11 +821,29 @@ export default function TradePage() {
         </div>
       )}
 
+      {!loading && access && !access.allowed && profileGateReason !== "plan_locked" ? (
+        <Card className="border-amber-200 bg-amber-50/70">
+          <CardHeader>
+            <CardTitle>
+              {profileGateReason === "profile_missing" ? "請先建立貿易檔案" : "貿易檔案審核中"}
+            </CardTitle>
+            <CardDescription>
+              {profileGateReason === "profile_missing"
+                ? "建立貿易檔案後，會送到 admin portal 進行身份審核。審核通過前，商品、詢價與 quotation 功能都不會開放。"
+                : "你的貿易檔案已送出，正等待 admin 審核身份。審核通過後才會開放商品建立、詢價與報價流程。"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => setTab("profile")}>前往貿易檔案</Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm md:grid-cols-4">
-          <TabsTrigger value="market">市場</TabsTrigger>
-          <TabsTrigger value="products">我的商品</TabsTrigger>
-          <TabsTrigger value="inquiries">詢價</TabsTrigger>
+          <TabsTrigger value="market" disabled={!access?.allowed}>市場</TabsTrigger>
+          <TabsTrigger value="products" disabled={!access?.allowed}>我的商品</TabsTrigger>
+          <TabsTrigger value="inquiries" disabled={!access?.allowed}>詢價</TabsTrigger>
           <TabsTrigger value="profile">貿易檔案</TabsTrigger>
         </TabsList>
 
@@ -1028,17 +1086,50 @@ export default function TradePage() {
         </TabsContent>
 
         <TabsContent value="products">
-          <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-neutral-200 bg-white p-4 shadow-sm">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-neutral-950">商品管理</h2>
+                <p className="mt-1 text-sm text-neutral-500">把商品清單與商品建檔拆成子頁切換，操作會更清楚。</p>
+              </div>
+              <div className="inline-flex rounded-2xl border border-neutral-200 bg-neutral-50 p-1">
+                <button
+                  type="button"
+                  onClick={() => setProductSubTab("list")}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    productSubTab === "list" ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500"
+                  }`}
+                >
+                  商品清單
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProductSubTab("form")}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    productSubTab === "form" ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500"
+                  }`}
+                >
+                  {editingProductId ? "編輯商品" : "新增商品"}
+                </button>
+              </div>
+            </div>
+
+            {productSubTab === "list" ? (
             <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
               <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
-                    <Boxes className="h-5 w-5" />
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
+                      <Boxes className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <CardTitle>我的商品庫</CardTitle>
+                      <CardDescription>Seller / Both 角色可建立商品、維護圖像與規格，作為後續詢價與 quotation 的來源。</CardDescription>
+                    </div>
                   </div>
-                  <div>
-                    <CardTitle>我的商品庫</CardTitle>
-                    <CardDescription>Seller / Both 角色可建立商品、維護圖像與規格，作為後續詢價與 quotation 的來源。</CardDescription>
-                  </div>
+                  <Button type="button" size="sm" onClick={() => setProductSubTab("form")}>
+                    新增商品
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4 p-5 lg:p-6">
@@ -1109,7 +1200,9 @@ export default function TradePage() {
                 )}
               </CardContent>
             </Card>
+            ) : null}
 
+            {productSubTab === "form" ? (
             <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
               <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
                 <div className="flex items-start gap-3">
@@ -1577,17 +1670,40 @@ export default function TradePage() {
                 )}
               </CardContent>
             </Card>
+            ) : null}
           </div>
         </TabsContent>
 
         <TabsContent value="inquiries">
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight text-neutral-950">詢價工作台</h2>
-              <p className="mt-1 text-sm text-neutral-500">左邊查看你送出的詢價，右邊處理 seller 收到的詢價與報價回覆。</p>
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-neutral-200 bg-white p-4 shadow-sm">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-neutral-950">詢價工作台</h2>
+                <p className="mt-1 text-sm text-neutral-500">把 buyer 與 seller 工作區拆成子頁切換，閱讀和操作都會更專注。</p>
+              </div>
+              <div className="inline-flex rounded-2xl border border-neutral-200 bg-neutral-50 p-1">
+                <button
+                  type="button"
+                  onClick={() => setInquirySubTab("sent")}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    inquirySubTab === "sent" ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500"
+                  }`}
+                >
+                  我送出的詢價
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInquirySubTab("received")}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    inquirySubTab === "received" ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500"
+                  }`}
+                >
+                  我收到的詢價
+                </button>
+              </div>
             </div>
-          </div>
-          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+
+            {inquirySubTab === "sent" ? (
             <InquiryColumn
               title="我送出的詢價"
               items={sentInquiries}
@@ -1600,6 +1716,9 @@ export default function TradePage() {
               onUpdateQuotationDraft={updateQuotationDraft}
               onSaveQuotation={(inquiry) => void saveQuotation(inquiry)}
             />
+            ) : null}
+
+            {inquirySubTab === "received" ? (
             <InquiryColumn
               title="我收到的詢價"
               items={receivedInquiries}
@@ -1614,6 +1733,7 @@ export default function TradePage() {
               onUpdateQuotationDraft={updateQuotationDraft}
               onSaveQuotation={(inquiry) => void saveQuotation(inquiry)}
             />
+            ) : null}
           </div>
         </TabsContent>
 
@@ -1627,12 +1747,17 @@ export default function TradePage() {
                 <div>
                   <CardTitle>貿易檔案</CardTitle>
                   <CardDescription>
-                這是 Trade module 的啟動入口。後續可擴充 Admin 審核、風控與完整公司資料。
+                先建立貿易檔案，再送到 admin portal 進行身份審核。審核通過後才會開放市場、商品與詢價功能。
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-5 lg:p-6">
+              {profile?.verified === false ? (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  目前狀態：待 admin 審核。若你更新檔案內容，系統也會重新送審。
+                </div>
+              ) : null}
               <form onSubmit={saveProfile} className="space-y-4">
                 <Field label="角色">
                   <select

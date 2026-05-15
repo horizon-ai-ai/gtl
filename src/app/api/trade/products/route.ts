@@ -2,7 +2,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertTradeModuleAccess, assertVerifiedTradeProfile } from "@/lib/trade";
 import { getActiveTradeCategories, normalizeTradeCategoryName } from "@/lib/trade-categories";
 
 const imagePathSchema = z.string().refine((value) => value.startsWith("/") || /^https?:\/\//.test(value), {
@@ -59,14 +59,14 @@ const createProductSchema = z.object({
   price_fob_usd: z.number().int().nonnegative().optional(),
   origin_country: z.string().max(100).optional(),
   certifications: z.array(z.string().min(1).max(100)).max(20).default([]),
-  status: z.enum(["draft", "published", "paused"]).default("published"),
+  status: z.enum(["draft", "published", "paused"]).default("draft"),
 });
 
 export async function GET(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const url = new URL(req.url);
     const scope = url.searchParams.get("scope") ?? "market";
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertVerifiedTradeProfile(session.user.id);
 
     const tradeProfile = await prisma.tradeProfile.findUnique({
       where: { user_id: session.user.id },
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
         currency: "USD",
         origin_country: body.origin_country,
         certifications: body.certifications,
-        status: body.status,
+        status: "draft",
         unit: "pcs",
         moq: 1,
       },

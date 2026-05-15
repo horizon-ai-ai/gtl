@@ -9,11 +9,11 @@ async function moderateProduct(formData: FormData) {
   const admin = await requireAdmin();
   const productId = String(formData.get("product_id") ?? "");
   const status = String(formData.get("status") ?? "");
-  if (!productId || !["published", "paused"].includes(status)) return;
+  if (!productId || !["draft", "published", "paused"].includes(status)) return;
 
   const product = await prisma.product.update({
     where: { id: productId },
-    data: { status: status as "published" | "paused" },
+    data: { status: status as "draft" | "published" | "paused" },
     include: {
       seller: { select: { email: true } },
     },
@@ -60,7 +60,7 @@ export default async function AdminTradeProductsPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
         <h1 className="text-2xl font-semibold">商品審核</h1>
-        <p className="text-sm text-neutral-500 mt-1">管理 seller 商品上架與暫停。</p>
+        <p className="text-sm text-neutral-500 mt-1">Seller 建立商品後先進待審，核准成 published 後才會進市場。</p>
         </div>
         <a href="/admin/trade/categories" className="rounded border px-4 py-2 text-sm hover:bg-neutral-50">
           商品類型管理
@@ -97,6 +97,7 @@ export default async function AdminTradeProductsPage() {
                   <form action={moderateProduct} className="flex gap-2">
                     <input type="hidden" name="product_id" value={product.id} />
                     <select name="status" defaultValue={product.status} className="rounded border px-2 py-1 text-xs">
+                      <option value="draft">draft</option>
                       <option value="published">published</option>
                       <option value="paused">paused</option>
                     </select>

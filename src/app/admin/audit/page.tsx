@@ -48,6 +48,7 @@ function buildAuditHref(log: { action: string; target_type: string; target_id: s
   if (log.target_type === "order") return `/admin/orders/${log.target_id}`;
   if (log.target_type === "user") return `/admin/users/${log.target_id}`;
   if (log.target_type === "product") return `/admin/trade/products`;
+  if (log.target_type === "trade_profile") return `/admin/trade/profiles`;
   if (log.target_type === "admin_copilot") return `/admin/copilot/history`;
   return null;
 }

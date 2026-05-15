@@ -237,6 +237,13 @@ export async function listAdminInquiryRows() {
 export async function getTradeOperationSummary() {
   const columns = await getInquiryColumnSupport();
   const q = quotationSelects(columns);
+  const hasQuotationStats = [
+    columns.quotation_version ? `"quotation_version" > 0` : null,
+    columns.quoted_price ? `"quoted_price" IS NOT NULL` : null,
+    columns.quotation_notes ? `COALESCE("quotation_notes", '') <> ''` : null,
+  ]
+    .filter(Boolean)
+    .join(" OR ") || "false";
   const [quotationStats, latestQuotations, latestTradeOrders] = await Promise.all([
     prisma.$queryRawUnsafe<
       { quotation_count: number; negotiating_count: number }[]
@@ -244,7 +251,7 @@ export async function getTradeOperationSummary() {
       `
         SELECT
           COUNT(*) FILTER (
-            WHERE ${q.hasQuotation}
+            WHERE ${hasQuotationStats}
           )::int AS "quotation_count",
           COUNT(*) FILTER (WHERE "status"::text = 'negotiating')::int AS "negotiating_count"
         FROM "Inquiry"
