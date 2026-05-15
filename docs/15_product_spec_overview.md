@@ -78,7 +78,7 @@
 - Users：帳號、方案、credits 管理
 - Orders：全平台訂單與異常處理
 - Support：ticket 接手、回覆、指派、狀態流
-- Trade Ops：quotation、生命週期規則、商品類型、商品審核
+- Trade Ops：quotation、生命週期規則、商品類型、身份審核、商品總覽
 - Analytics：admin analytics viewer
 - KB：知識庫管理、reindex、retrieval debug
 - Copilot：跨模組 AI 分析與 insight
@@ -242,14 +242,16 @@
 5. admin / support 接手處理
 
 ### 5.2 Trade 成交流程
-1. seller 建立 trade profile 與商品
-2. buyer 於市場商品發送詢價
-3. seller 收到通知，進 quotation workspace
-4. seller 生成制式 quotation 並送出
-5. buyer 在 quotation inbox 查看
-6. admin 可在 trade quotation / ops 看到對接進度
-7. admin 或 seller 觸發成立訂單
-8. user portal 顯示 trade order lifecycle
+1. seller 建立 trade profile
+2. admin 審核 trade 身份
+3. seller 身份通過後建立商品，商品直接進市場
+4. buyer 於市場商品發送詢價
+5. seller 收到通知，進 quotation workspace
+6. seller 生成制式 quotation 並送出
+7. buyer 在 quotation inbox 查看
+8. admin 可在 trade quotation / ops 看到對接進度
+9. admin 或 seller 觸發成立訂單
+10. user portal 顯示 trade order lifecycle
 
 ### 5.3 建站流程
 1. user 建立 site

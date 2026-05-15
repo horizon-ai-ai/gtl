@@ -159,7 +159,7 @@ const EMPTY_PRODUCT = {
   food_registration_no: "",
   commission_rate: "",
   certifications: "",
-  status: "draft",
+  status: "published",
 };
 
 const EMPTY_SPECIAL_VARIANT = {
@@ -1212,7 +1212,7 @@ export default function TradePage() {
                   <div>
                     <CardTitle>{editingProductId ? "編輯商品" : "新增商品"}</CardTitle>
                     <CardDescription>
-                  目前已支援真實檔案上傳；若有設定 `ASSET_BASE_URL`，會自動生成 CDN URL。
+                  身份審核通過後，seller 建立商品會直接進市場；若有設定 `ASSET_BASE_URL`，會自動生成 CDN URL。
                     </CardDescription>
                   </div>
                 </div>
@@ -1341,12 +1341,6 @@ export default function TradePage() {
                       </Field>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="狀態">
-                        <Input
-                          value={productForm.status}
-                          onChange={(e) => setProductForm((v) => ({ ...v, status: e.target.value }))}
-                        />
-                      </Field>
                       <Field label="應免稅/稅別">
                         <Input
                           value={productForm.tax_category}

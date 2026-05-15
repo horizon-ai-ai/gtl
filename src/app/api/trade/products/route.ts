@@ -59,7 +59,7 @@ const createProductSchema = z.object({
   price_fob_usd: z.number().int().nonnegative().optional(),
   origin_country: z.string().max(100).optional(),
   certifications: z.array(z.string().min(1).max(100)).max(20).default([]),
-  status: z.enum(["draft", "published", "paused"]).default("draft"),
+  status: z.enum(["draft", "published", "paused"]).default("published"),
 });
 
 export async function GET(req: Request) {
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
         currency: "USD",
         origin_country: body.origin_country,
         certifications: body.certifications,
-        status: "draft",
+        status: "published",
         unit: "pcs",
         moq: 1,
       },

@@ -163,12 +163,12 @@ flowchart TD
 
 ### 6.8 Admin 審核
 - 審核項目：
-  - seller profile
-  - product publish / pause
+  - seller / buyer trade profile 身份
   - suspicious inquiry
+- 商品不作為進市場前置審核；admin 保留商品總覽與人工 pause 能力
 - Admin 頁面：
+  - `/admin/trade/profiles`
   - `/admin/trade/products`
-  - `/admin/trade/sellers`
 
 ---
 

@@ -191,7 +191,7 @@ async function getTradeSummary(): Promise<AdminCopilotToolCard> {
       ...recentInquiries.map((inquiry) => ({
         type: "recent_inquiry",
         href: "/admin/trade/products",
-        href_label: "查看商品審核",
+        href_label: "查看商品列表",
         product: inquiry.product.name,
         product_id: inquiry.product.id,
         buyer: inquiry.buyer.display_name ?? inquiry.buyer.email,

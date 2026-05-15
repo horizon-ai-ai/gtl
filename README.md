@@ -136,6 +136,7 @@ npm run admin:dev
 - Billing 基本方案切換
 - Orders 基本管理
 - Trade 商品、詢價、quotation、trade lifecycle
+- Trade 身份需 admin 審核；身份通過後建立商品會直接上架
 - Support ticket + RAG 問答
 - Sites 建立、預覽、發佈
 - GA4 integrations / dashboard 基礎

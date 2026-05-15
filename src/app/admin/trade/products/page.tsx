@@ -59,8 +59,8 @@ export default async function AdminTradeProductsPage() {
     <div className="p-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-        <h1 className="text-2xl font-semibold">商品審核</h1>
-        <p className="text-sm text-neutral-500 mt-1">Seller 建立商品後先進待審，核准成 published 後才會進市場。</p>
+        <h1 className="text-2xl font-semibold">商品列表</h1>
+        <p className="text-sm text-neutral-500 mt-1">Seller 身份審核通過後，建立商品會直接進市場；這裡保留給 admin 做檢視與人工下架。</p>
         </div>
         <a href="/admin/trade/categories" className="rounded border px-4 py-2 text-sm hover:bg-neutral-50">
           商品類型管理

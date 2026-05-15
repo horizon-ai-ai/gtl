@@ -31,7 +31,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: "/admin/analytics", label: "Analytics", icon: ChartColumn },
     { href: "/admin/trade", label: "Trade Ops", icon: Boxes },
     { href: "/admin/trade/profiles", label: "身份審核", icon: Boxes },
-    { href: "/admin/trade/products", label: "商品審核", icon: Boxes },
+    { href: "/admin/trade/products", label: "商品列表", icon: Boxes },
     { href: "/admin/trade/categories", label: "商品類型", icon: Boxes },
     { href: "/admin/trade/quotations", label: "Quotation", icon: Boxes },
     { href: "/admin/trade/lifecycle", label: "生命週期", icon: Boxes },

@@ -201,6 +201,12 @@ User/Admin Browser
 - trade lifecycle
 - trade admin operations
 
+當前 trade 規則：
+- `TradeProfile` 建立後需由 admin 審核 `verified=true`
+- 僅 verified trade user 可使用商品、詢價、quotation、通知與 trade 訂單路徑
+- 商品建立後直接 `published`
+- admin 對商品保留人工 pause / 總覽能力，但不做上架前審核
+
 ### 5.6 Support / RAG Domain
 檔案：
 - `src/app/(app)/support/page.tsx`

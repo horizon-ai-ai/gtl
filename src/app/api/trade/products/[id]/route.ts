@@ -119,7 +119,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       currency: "USD",
       unit: "pcs",
       moq: 1,
-      status: "draft",
     };
     delete data.price_fob_usd;
     if (body.category) {
