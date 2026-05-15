@@ -2,14 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertVerifiedTradeProfile } from "@/lib/trade";
 import { buildTradeLifecycleTimeline, listTradeLifecycleRules } from "@/lib/trade-lifecycle";
 import { Card } from "@/components/ui/card";
 
 export default async function TradeOrdersPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  await assertVerifiedTradeProfile(session.user.id);
 
   const [orders, rules] = await Promise.all([
     prisma.order.findMany({

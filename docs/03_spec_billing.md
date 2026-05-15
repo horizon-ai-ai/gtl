@@ -184,7 +184,7 @@ UserUsage  // 見 02_spec_chat.md
 
 實作方式：
 - DB：`Plan.features` jsonb 儲存 feature flag
-- 中間件：`requireFeature('trade_module')`
+- seller 權限相關流程使用 `trade_module`
 - 前端：`useFeatureFlag()` hook 控制 UI 顯示
 
 | Flag | 對應功能 |
@@ -194,7 +194,7 @@ UserUsage  // 見 02_spec_chat.md
 | `pagebuilder` | Puck 建站 |
 | `pagebuilder.custom_domain` | 自訂網域 |
 | `pagebuilder.max_sites` | 站數上限（int） |
-| `trade_module` | 貿易模組 |
+| `trade_module` | 開啟 seller 身份申請、商品上架與 seller quotation 流程 |
 | `rag.advanced` | 進階 RAG |
 | `team.max_members` | 子帳號數（int） |
 | `api_access` | API 存取 |

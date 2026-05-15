@@ -2,7 +2,7 @@
 
 **Status**: Working Plan  
 **Owner**: Grace Wu  
-**Last Updated**: 2026-04-30
+**Last Updated**: 2026-05-15
 
 ---
 
@@ -11,16 +11,16 @@
 | 版本 | 日期 | 變更內容 | 作者 |
 |---|---|---|---|
 | v0.1 | 2026-04-30 | 補 Trade module 交付計畫、Seller/Buyer flow、功能分期 | Codex |
+| v0.2 | 2026-05-15 | 調整權限模型：所有登入用戶可市場瀏覽/詢價，seller 需升級+身份審核 | Codex |
 
 ---
 
 ## 1. 目前已完成
 
-- Trade access gating（Pro+ / admin）
-- Trade profile（Buyer / Seller / Both）
+- Trade access gating（所有登入用戶可進市場；seller 功能需方案+身份審核）
+- Trade profile（seller only）
 - 商品建立、編輯、下架
 - 市場商品列表
-- Seller 自己的已上架商品區塊
 - Inquiry 建立與 sent / received 列表
 
 ---
@@ -32,7 +32,7 @@
 - Buyer / Seller detail page
 - 類別樹 / HS code 搜尋
 - 商品圖片上傳
-- Admin 審核流程（商品 / seller）
+- Admin 審核流程（seller 身份）
 
 ### Phase B — 對外溝通與正式報價
 - Quotation PDF
@@ -53,7 +53,7 @@
 1. Product detail page + Buyer / Seller detail page
 2. 類別樹 / HS code 搜尋
 3. 圖片上傳
-4. Admin 審核流程
+4. Seller 身份審核流程
 5. Quotation PDF
 6. Email 通知
 7. CSV 匯入
@@ -70,20 +70,19 @@
 
 ```mermaid
 flowchart TD
-    A["進入 /trade"] --> B{"是否為 Pro+ 或 Admin"}
-    B -- "否" --> C["導向 Billing 升級"]
-    B -- "是" --> D["建立 Trade Profile"]
-    D --> E["角色選擇 Seller / Both"]
-    E --> F["填公司簡介、產品類別、目標市場、產能"]
+    A["進入 /trade"] --> B["瀏覽市場商品 / 送出詢價"]
+    B --> C["升級方案"]
+    C --> D["建立 Seller Trade Profile"]
+    D --> E["送交 Admin 審核身份"]
+    E --> F["審核通過"]
     F --> G["建立商品"]
     G --> H["填商品名稱、類別、描述、HS Code、MOQ、價格"]
     H --> I["上傳商品圖片（待補）"]
-    I --> J["送審 / 發布（待補審核流）"]
-    J --> K["市場可見"]
-    K --> L["收到 Buyer Inquiry"]
-    L --> M["查看詢價細節"]
-    M --> N["產生 Quotation PDF（待補）"]
-    N --> O["寄送 Email / 平台通知（待補）"]
+    I --> J["直接發布到市場"]
+    J --> K["收到 Buyer Inquiry"]
+    K --> L["查看詢價細節"]
+    L --> M["產生 Quotation PDF（待補）"]
+    M --> N["寄送 Email / 平台通知（待補）"]
 ```
 
 ---
@@ -92,19 +91,14 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["進入 /trade"] --> B{"是否為 Pro+ 或 Admin"}
-    B -- "否" --> C["導向 Billing 升級"]
-    B -- "是" --> D["建立 Trade Profile"]
-    D --> E["角色選擇 Buyer / Both"]
-    E --> F["填採購類別、目標市場、預算"]
-    F --> G["瀏覽市場商品"]
-    G --> H["依類別 / HS code / 關鍵字搜尋（待補）"]
-    H --> I["查看 Product Detail（待補）"]
-    I --> J["送出 Inquiry"]
-    J --> K["填數量、目標價、交貨條件、付款條件、目的港"]
-    K --> L["Seller 收到詢價"]
-    L --> M["Buyer 收到通知 / Quotation PDF（待補）"]
-    M --> N["AI 協助比價（待補）"]
+    A["進入 /trade"] --> B["瀏覽市場商品"]
+    B --> C["依類別 / HS code / 關鍵字搜尋（待補）"]
+    C --> D["查看 Product Detail（待補）"]
+    D --> E["送出 Inquiry"]
+    E --> F["填數量、目標價、交貨條件、付款條件、目的港"]
+    F --> G["Seller 收到詢價"]
+    G --> H["Buyer 收到通知 / Quotation PDF（待補）"]
+    H --> I["AI 協助比價（待補）"]
 ```
 
 ---
@@ -163,7 +157,7 @@ flowchart TD
 
 ### 6.8 Admin 審核
 - 審核項目：
-  - seller / buyer trade profile 身份
+  - seller trade profile 身份
   - suspicious inquiry
 - 商品不作為進市場前置審核；admin 保留商品總覽與人工 pause 能力
 - Admin 頁面：

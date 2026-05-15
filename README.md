@@ -135,8 +135,9 @@ npm run admin:dev
 - AI Chat + SSE streaming
 - Billing 基本方案切換
 - Orders 基本管理
-- Trade 商品、詢價、quotation、trade lifecycle
-- Trade 身份需 admin 審核；身份通過後建立商品會直接上架
+- 所有登入用戶可瀏覽 Trade 市場商品並送出詢價
+- Trade seller 身份需先升級方案並通過 admin 審核；審核後可建立商品並直接上架
+- Trade quotation、notifications、trade lifecycle
 - Support ticket + RAG 問答
 - Sites 建立、預覽、發佈
 - GA4 integrations / dashboard 基礎

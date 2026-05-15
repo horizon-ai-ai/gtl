@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { assertVerifiedTradeProfile } from "@/lib/trade";
+import { assertSellerTradeAccess } from "@/lib/trade";
 import { listSellerQuotationRows } from "@/lib/trade-quotations";
 import { Card } from "@/components/ui/card";
 import { QuotationWorkspace } from "./quotation-workspace";
@@ -8,7 +8,7 @@ import { QuotationWorkspace } from "./quotation-workspace";
 export default async function TradeQuotationsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  await assertVerifiedTradeProfile(session.user.id);
+  await assertSellerTradeAccess(session.user.id);
 
   const inquiries = await listSellerQuotationRows(session.user.id);
 

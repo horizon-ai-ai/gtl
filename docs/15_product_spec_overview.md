@@ -3,7 +3,7 @@
 **Product**: Marketing AI Platform  
 **Status**: Working Draft  
 **Owner**: Grace Wu  
-**Last Updated**: 2026-05-13
+**Last Updated**: 2026-05-15
 
 ---
 
@@ -12,6 +12,7 @@
 | 版本 | 日期 | 變更內容 | 作者 |
 |---|---|---|---|
 | v0.1 | 2026-05-13 | 建立產品總覽 spec，整合現有 PRD 與已開發模組 | Codex |
+| v0.2 | 2026-05-15 | 更新 trade 權限模型：所有登入用戶可市場瀏覽/詢價，seller 需方案+身份審核 | Codex |
 
 ---
 
@@ -51,7 +52,7 @@
 - 核心功能：Chat、Sites、Orders、Analytics、Support、Pro
 
 ### 2.3 B2B 貿易商 / 工廠
-- 需求：商品上架、接 buyer 詢價、產 quotation、建立訂單
+- 需求：瀏覽市場商品、送出詢價，或升級後成為 seller 上架商品、接 buyer 詢價、產 quotation、建立訂單
 - 核心功能：Trade、Quotation、Lifecycle、Admin 人工對接
 
 ### 2.4 平台營運管理者
@@ -68,7 +69,7 @@
 - Orders：訂單列表、明細、草稿、貿易來源訂單
 - Billing：方案切換、訂閱資訊、invoice history
 - Sites：建立網站、AI 產生 landing page、預覽、發佈
-- Trade：商品庫、詢價、quotation、buyer/seller 檔案、通知、貿易訂單生命週期
+- Trade：市場商品庫、詢價、seller 身份檔案、商品上架、quotation、通知、貿易訂單生命週期
 - Support：RAG 問答、ticket 查看與回覆
 - Integrations：GA4 連接與設定
 - Analytics：GA4 dashboard
@@ -242,16 +243,17 @@
 5. admin / support 接手處理
 
 ### 5.2 Trade 成交流程
-1. seller 建立 trade profile
-2. admin 審核 trade 身份
-3. seller 身份通過後建立商品，商品直接進市場
-4. buyer 於市場商品發送詢價
-5. seller 收到通知，進 quotation workspace
-6. seller 生成制式 quotation 並送出
-7. buyer 在 quotation inbox 查看
-8. admin 可在 trade quotation / ops 看到對接進度
-9. admin 或 seller 觸發成立訂單
-10. user portal 顯示 trade order lifecycle
+1. 所有登入用戶可瀏覽市場商品
+2. buyer 於市場商品發送詢價
+3. 若要成為 seller，先升級方案並建立 seller trade profile
+4. admin 審核 seller 身份
+5. seller 身份通過後建立商品，商品直接進市場
+6. seller 收到通知，進 quotation workspace
+7. seller 生成制式 quotation 並送出
+8. buyer 在 quotation inbox 查看
+9. admin 可在 trade quotation / ops 看到對接進度
+10. admin 或 seller 觸發成立訂單
+11. user portal 顯示 trade order lifecycle
 
 ### 5.3 建站流程
 1. user 建立 site
@@ -302,7 +304,7 @@
 - `anomaly_detection`
 
 ### 7.2 目前策略
-- Trade 與較完整 Analytics 屬於進階方案能力
+- Trade 市場瀏覽與詢價對所有登入用戶開放；seller 身份申請、商品上架與 seller quotation 屬於進階方案能力
 - Admin / super_admin 可做營運測試與繞過
 
 ---

@@ -1,8 +1,8 @@
-# 06 — Spec: 貿易模組（Buyer / Seller / 詢價 / Quotation）
+# 06 — Spec: 貿易模組（市場商品 / Seller / 詢價 / Quotation）
 
 **Status**: Draft
 **Owner**: Grace Wu
-**Last Updated**: 2026-04-30
+**Last Updated**: 2026-05-15
 
 ---
 
@@ -12,16 +12,17 @@
 |---|---|---|---|
 | v0.1 | 2026-04-30 | 初版 — 商品庫 + 詢價流程 + Quotation PDF | Grace Wu |
 | v0.2 | 2026-05-15 | 調整審核規則：貿易身份需審核，商品建立後直接上架 | Codex |
+| v0.3 | 2026-05-15 | 調整權限：所有登入用戶可瀏覽市場商品與詢價；移除 Buyer/Both 身份 | Codex |
 
 ---
 
 ## 1. 範圍
 
 ### In Scope
-- 啟用貿易模組（Pro+）
-- 角色選擇：Buyer / Seller / Both
-- Seller：商品上傳、管理（身份審核通過後）
-- Buyer：商品搜尋、詢價
+- 所有登入用戶可瀏覽市場商品庫
+- 所有登入用戶可對市場商品送出詢價
+- Seller 需升級方案後申請身份，經 admin 審核通過後可上架商品
+- Seller：商品上傳、管理、quotation 回覆
 - 詢價自動化：雙向 email + Quotation PDF
 - 商品分類（HS Code 標準）
 
@@ -37,21 +38,21 @@
 ## 2. 啟用流程
 
 ```
-Pro 方案啟用後
+登入後
   → [貿易模組] 入口顯示
-  → 用戶點擊 → 選擇角色（Buyer / Seller / Both）
-  → 補填貿易檔案：
-      Seller: 公司簡介、主力產品類別、出口國、產能
-      Buyer: 採購類別、預算區間、目標市場
-  → 完成 → 送交 Admin 審核身份
-  → 審核通過 → 進入主介面
+  → 可直接瀏覽市場商品、送出詢價
+  → 若要成為 Seller：
+      先升級方案
+      → 補填賣家貿易檔案
+      → 送交 Admin 審核身份
+      → 審核通過
+      → 開放商品上架、Seller quotation、通知中心
 ```
-
-角色可後續切換但需 Admin 審核（防濫用）。
 
 補充規則：
 - 貿易身份需要 Admin 審核
-- 商品不需上架前審核；身份核准後，seller 建立商品會直接進市場
+- 商品不需上架前審核；seller 身份核准後，建立商品會直接進市場
+- 系統不再提供 `buyer` / `both` 身份選擇；buyer 為所有登入用戶的預設能力
 
 ---
 
@@ -65,7 +66,7 @@ Pro 方案啟用後
 | S-3 | 收到 Buyer 詢價，取得對方聯絡資訊 |
 | S-4 | 自訂 Quotation 模板（公司 logo、條款） |
 
-### Buyer
+### 一般用戶（預設 Buyer 能力）
 | # | Story |
 |---|---|
 | B-1 | 關鍵字 / HS Code / 類別搜尋 |
@@ -242,7 +243,7 @@ InquiryEvent {
 
 | Method | Path | 說明 |
 |---|---|---|
-| POST | `/api/trade/profile` | 設定貿易角色 |
+| POST | `/api/trade/profile` | 建立 / 更新 seller 身份檔案 |
 | GET | `/api/trade/products` | 商品搜尋 |
 | POST | `/api/trade/products` | 上架商品 |
 | PATCH | `/api/trade/products/:id` | 編輯 |

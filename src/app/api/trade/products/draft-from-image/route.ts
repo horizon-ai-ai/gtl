@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertVerifiedTradeProfile } from "@/lib/trade";
+import { assertSellerTradeAccess } from "@/lib/trade";
 import { prisma } from "@/lib/db";
 import { saveTradeFiles } from "@/lib/trade-assets";
 import { createTradeProductDraftFromImages } from "@/lib/trade-vision";
@@ -11,12 +11,12 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     const tradeProfile = await prisma.tradeProfile.findUnique({
       where: { user_id: session.user.id },
     });
-    if (!tradeProfile || (tradeProfile.role !== "seller" && tradeProfile.role !== "both")) {
+    if (!tradeProfile || tradeProfile.role !== "seller") {
       throw new ApiError("BUSINESS_RULE_VIOLATION", "Seller profile required");
     }
 

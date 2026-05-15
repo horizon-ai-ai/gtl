@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { assertVerifiedTradeProfile } from "@/lib/trade";
+import { getTradeAccessState } from "@/lib/trade";
 import { getInquiryColumnSupport } from "@/lib/trade-quotations";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -110,7 +110,7 @@ function buildNotifications(params: {
 export default async function TradeNotificationsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  await assertVerifiedTradeProfile(session.user.id);
+  const sellerAccess = (await getTradeAccessState(session.user.id)).seller_allowed;
 
   const columns = await getInquiryColumnSupport();
   const quotedPrice = columns.quoted_price ? `i."quoted_price"` : `NULL::integer`;
@@ -153,7 +153,8 @@ export default async function TradeNotificationsPage() {
       `,
       session.user.id,
     ),
-    prisma.$queryRawUnsafe<Array<{
+    sellerAccess
+      ? prisma.$queryRawUnsafe<Array<{
       id: string;
       status: string;
       updated_at: Date;
@@ -182,13 +183,16 @@ export default async function TradeNotificationsPage() {
         LIMIT 20
       `,
       session.user.id,
-    ),
-    prisma.product.findMany({
-      where: { seller_id: session.user.id, deleted_at: null },
-      select: { id: true, name: true, status: true, updated_at: true },
-      orderBy: { updated_at: "desc" },
-      take: 20,
-    }),
+    )
+      : Promise.resolve([]),
+    sellerAccess
+      ? prisma.product.findMany({
+          where: { seller_id: session.user.id, deleted_at: null },
+          select: { id: true, name: true, status: true, updated_at: true },
+          orderBy: { updated_at: "desc" },
+          take: 20,
+        })
+      : Promise.resolve([]),
   ]);
 
   const notifications = buildNotifications({ sent, received, products });

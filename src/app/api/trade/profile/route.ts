@@ -2,10 +2,10 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/api";
-import { assertTradeModuleAccess } from "@/lib/trade";
+import { assertSellerTradeAccess } from "@/lib/trade";
 
 const profileSchema = z.object({
-  role: z.enum(["buyer", "seller", "both"]),
+  role: z.enum(["seller"]).default("seller"),
   description: z.string().max(1000).optional(),
   product_categories: z.array(z.string().min(1).max(50)).max(20).default([]),
   target_markets: z.array(z.string().min(1).max(50)).max(20).default([]),
@@ -17,7 +17,7 @@ export async function GET() {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     const profile = await prisma.tradeProfile.findUnique({
       where: { user_id: session.user.id },
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertTradeModuleAccess(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     const body = profileSchema.parse(await req.json());
     const profile = await prisma.tradeProfile.upsert({

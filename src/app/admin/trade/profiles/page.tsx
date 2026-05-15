@@ -72,7 +72,7 @@ export default async function AdminTradeProfilesPage() {
       <div>
         <h1 className="text-2xl font-semibold">身份審核</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          使用者建立貿易檔案後，需由 admin 審核身份；通過後才可使用商品、詢價與 quotation 流程。
+          使用者升級方案後可申請賣家身份；需由 admin 審核通過後，才可使用商品上架與 Seller quotation 流程。
         </p>
       </div>
 
@@ -100,7 +100,7 @@ export default async function AdminTradeProfilesPage() {
                   <div>{profile.user.company?.name ?? "—"}</div>
                   <div className="text-xs text-neutral-500">{profile.user.company?.tax_id ?? "無統編"}</div>
                 </td>
-                <td className="p-3 uppercase">{profile.role}</td>
+                <td className="p-3 uppercase">{profile.role === "both" ? "seller" : profile.role}</td>
                 <td className="p-3 text-neutral-600">
                   {profile.product_categories.length ? profile.product_categories.join(", ") : "—"}
                 </td>

@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-type TradeRole = "buyer" | "seller" | "both";
+type TradeRole = "seller";
 
 type TradeProfile = {
   role: TradeRole;
@@ -33,9 +33,10 @@ type TradeProfile = {
 
 type TradeAccess = {
   allowed: boolean;
+  seller_allowed: boolean;
   profile_exists: boolean;
   profile_verified: boolean;
-  reason: "plan_locked" | "profile_missing" | "profile_pending_review" | "ready";
+  reason: "buyer_ready" | "seller_plan_locked" | "profile_missing" | "profile_pending_review" | "ready";
 };
 
 type TradeFilters = {
@@ -115,7 +116,7 @@ type Inquiry = {
 };
 
 const EMPTY_PROFILE = {
-  role: "buyer" as TradeRole,
+  role: "seller" as TradeRole,
   description: "",
   product_categories: "",
   target_markets: "",
@@ -218,19 +219,15 @@ export default function TradePage() {
     void (async () => {
       setLoading(true);
       const nextAccess = await loadAccess();
-      if (nextAccess.reason !== "plan_locked") {
+      if (nextAccess.seller_allowed || nextAccess.profile_exists) {
         await loadProfile();
       }
-      if (nextAccess.allowed) {
-        await Promise.all([
-          loadCatalog(),
-          loadProducts(),
-          loadInquiries("sent"),
-          loadInquiries("received"),
-        ]);
-      } else if (nextAccess.reason === "profile_missing" || nextAccess.reason === "profile_pending_review") {
-        setTab("profile");
-      }
+      await Promise.all([
+        loadCatalog(),
+        loadProducts(nextAccess.seller_allowed),
+        loadInquiries("sent"),
+        loadInquiries("received"),
+      ]);
       setLoading(false);
     })();
   }, []);
@@ -239,13 +236,17 @@ export default function TradePage() {
     const res = await fetch("/api/trade/access");
     const json = await res.json();
     const nextAccess = (json.data ??
-      { allowed: false, profile_exists: false, profile_verified: false, reason: "plan_locked" }) as TradeAccess;
+      { allowed: false, seller_allowed: false, profile_exists: false, profile_verified: false, reason: "seller_plan_locked" }) as TradeAccess;
     setAccess(nextAccess);
     return nextAccess;
   }
 
   async function loadProfile() {
     const res = await fetch("/api/trade/profile");
+    if (!res.ok) {
+      setProfile(null);
+      return;
+    }
     const json = await res.json();
     const nextProfile = (json.data ?? null) as TradeProfile;
     setProfile(nextProfile);
@@ -267,17 +268,17 @@ export default function TradePage() {
     setCatalog(json.data ?? { categories: [], hs_codes: [] });
   }
 
-  async function loadProducts() {
+  async function loadProducts(sellerAllowed = access?.seller_allowed ?? false) {
     const marketParams = new URLSearchParams({ scope: "market" });
     if (filters.q.trim()) marketParams.set("q", filters.q.trim());
     if (filters.category.trim()) marketParams.set("category", filters.category.trim());
     if (filters.hs_code.trim()) marketParams.set("hs_code", filters.hs_code.trim());
 
     const [mineRes, marketRes] = await Promise.all([
-      fetch("/api/trade/products?scope=mine"),
+      sellerAllowed ? fetch("/api/trade/products?scope=mine") : Promise.resolve(null),
       fetch(`/api/trade/products?${marketParams.toString()}`),
     ]);
-    const mineJson = await mineRes.json();
+    const mineJson = mineRes ? await mineRes.json() : { data: [] };
     const marketJson = await marketRes.json();
     setMyProducts(mineJson.data ?? []);
     setMarketProducts(marketJson.data ?? []);
@@ -299,7 +300,7 @@ export default function TradePage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        role: profileForm.role,
+        role: "seller",
         description: profileForm.description || undefined,
         product_categories: splitCsv(profileForm.product_categories),
         target_markets: splitCsv(profileForm.target_markets),
@@ -318,7 +319,7 @@ export default function TradePage() {
     setProfile(json.data);
     await loadAccess();
     setTab("profile");
-    setStatus("貿易檔案已送出，待 admin 審核身份後才會開放商品與詢價功能");
+    setStatus("賣家身份檔案已送出，待 admin 審核後才會開放商品上架與 seller 功能");
   }
 
   async function createProduct(e: React.FormEvent) {
@@ -703,31 +704,17 @@ export default function TradePage() {
     setTab("inquiries");
   }
 
-  const canSell = profile?.role === "seller" || profile?.role === "both";
+  const canSell = access?.seller_allowed ?? false;
   const profileGateReason = access?.reason;
 
-  if (!loading && access && access.reason === "plan_locked") {
-    return (
-      <div className="p-8 max-w-4xl mx-auto">
-        <Card>
-          <CardHeader>
-            <CardTitle>貿易模組需升級方案</CardTitle>
-            <CardDescription>
-              目前 trade module 僅開放 `Pro` 以上方案。你可以先升級，再進行 Buyer / Seller 建置。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex items-center gap-3">
-            <a href="/billing">
-              <Button>前往方案計費</Button>
-            </a>
-            <Button variant="outline" onClick={() => setTab("market")}>
-              我知道了
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!canSell && inquirySubTab === "received") {
+      setInquirySubTab("sent");
+    }
+    if (!canSell && tab === "products") {
+      setTab("market");
+    }
+  }, [canSell, inquirySubTab, tab]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 lg:px-8">
@@ -743,8 +730,8 @@ export default function TradePage() {
                 把商品、詢價、報價與貿易訂單整理成同一個工作台
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-neutral-600 lg:text-base">
-                這裡是 buyer / seller 共用的貿易前台。你可以在市場找商品、快速發送詢價、管理自己的商品，
-                再一路接到 quotation 與訂單生命週期。
+                所有登入用戶都能在這裡瀏覽市場商品與送出詢價；升級方案並完成賣家身份審核後，才會開放商品上架、
+                Seller quotation 與賣家通知功能。
               </p>
             </div>
 
@@ -755,10 +742,17 @@ export default function TradePage() {
                     <Package2 className="h-4 w-4" />
                     <span>貿易訂單</span>
                   </Link>
-                  <Link href="/trade/quotations" className="trade-quick-link">
-                    <ScrollText className="h-4 w-4" />
-                    <span>Seller Quotation</span>
-                  </Link>
+                  {canSell ? (
+                    <Link href="/trade/quotations" className="trade-quick-link">
+                      <ScrollText className="h-4 w-4" />
+                      <span>Seller Quotation</span>
+                    </Link>
+                  ) : (
+                    <a href="/billing" className="trade-quick-link">
+                      <ScrollText className="h-4 w-4" />
+                      <span>升級成賣家</span>
+                    </a>
+                  )}
                   <Link href="/trade/quotations/inbox" className="trade-quick-link">
                     <ClipboardList className="h-4 w-4" />
                     <span>Buyer Quotation</span>
@@ -776,7 +770,7 @@ export default function TradePage() {
                   </div>
                   <div className="trade-quick-link cursor-not-allowed opacity-55">
                     <ScrollText className="h-4 w-4" />
-                    <span>Seller Quotation</span>
+                    <span>升級成賣家</span>
                   </div>
                   <div className="trade-quick-link cursor-not-allowed opacity-55">
                     <ClipboardList className="h-4 w-4" />
@@ -799,8 +793,8 @@ export default function TradePage() {
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <div className="text-2xl font-semibold uppercase text-neutral-950">{profile?.role ?? "buyer"}</div>
-                  <div className="text-sm text-neutral-500">Buyer / Seller 權限由貿易檔案設定決定</div>
+                  <div className="text-2xl font-semibold uppercase text-neutral-950">{canSell ? "seller" : "buyer"}</div>
+                  <div className="text-sm text-neutral-500">Buyer 能力預設開放；Seller 需訂閱並完成身份審核</div>
                 </div>
               </div>
             </div>
@@ -821,20 +815,32 @@ export default function TradePage() {
         </div>
       )}
 
-      {!loading && access && !access.allowed && profileGateReason !== "plan_locked" ? (
+      {!loading && access && !canSell ? (
         <Card className="border-amber-200 bg-amber-50/70">
           <CardHeader>
             <CardTitle>
-              {profileGateReason === "profile_missing" ? "請先建立貿易檔案" : "貿易檔案審核中"}
+              {profileGateReason === "seller_plan_locked"
+                ? "升級方案後可申請賣家身份"
+                : profileGateReason === "profile_missing"
+                  ? "請先建立賣家身份檔案"
+                  : "賣家身份審核中"}
             </CardTitle>
             <CardDescription>
-              {profileGateReason === "profile_missing"
-                ? "建立貿易檔案後，會送到 admin portal 進行身份審核。審核通過前，商品、詢價與 quotation 功能都不會開放。"
-                : "你的貿易檔案已送出，正等待 admin 審核身份。審核通過後才會開放商品建立、詢價與報價流程。"}
+              {profileGateReason === "seller_plan_locked"
+                ? "你目前已可瀏覽市場商品與發詢價。若要成為賣家上架商品，請先升級到含 trade seller 權限的方案。"
+                : profileGateReason === "profile_missing"
+                  ? "建立賣家身份檔案後，會送到 admin portal 進行審核。審核通過前，商品上架與 Seller quotation 功能不會開放。"
+                  : "你的賣家身份檔案已送出，正等待 admin 審核。審核通過後才會開放商品上架與 Seller 功能。"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => setTab("profile")}>前往貿易檔案</Button>
+            {profileGateReason === "seller_plan_locked" ? (
+              <a href="/billing">
+                <Button>前往方案計費</Button>
+              </a>
+            ) : (
+              <Button onClick={() => setTab("profile")}>前往賣家身份檔案</Button>
+            )}
           </CardContent>
         </Card>
       ) : null}
@@ -842,9 +848,9 @@ export default function TradePage() {
       <Tabs value={tab} onValueChange={setTab} className="space-y-6">
         <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-2 rounded-2xl border border-neutral-200 bg-white p-2 shadow-sm md:grid-cols-4">
           <TabsTrigger value="market" disabled={!access?.allowed}>市場</TabsTrigger>
-          <TabsTrigger value="products" disabled={!access?.allowed}>我的商品</TabsTrigger>
+          <TabsTrigger value="products" disabled={!canSell}>我的商品</TabsTrigger>
           <TabsTrigger value="inquiries" disabled={!access?.allowed}>詢價</TabsTrigger>
-          <TabsTrigger value="profile">貿易檔案</TabsTrigger>
+          <TabsTrigger value="profile">賣家身份</TabsTrigger>
         </TabsList>
 
         <TabsContent value="market">
@@ -929,7 +935,7 @@ export default function TradePage() {
             ) : marketProducts.length === 0 ? (
               <Card className="rounded-[24px]">
                 <CardContent className="p-12 text-center text-neutral-500">
-                  尚無已上架商品。先建立 Seller 檔案並新增第一個商品。
+                  尚無已上架商品。完成賣家身份審核後，就可以新增第一個商品。
                 </CardContent>
               </Card>
             ) : (
@@ -1124,7 +1130,7 @@ export default function TradePage() {
                     </div>
                     <div>
                       <CardTitle>我的商品庫</CardTitle>
-                      <CardDescription>Seller / Both 角色可建立商品、維護圖像與規格，作為後續詢價與 quotation 的來源。</CardDescription>
+                      <CardDescription>完成賣家身份審核後，可建立商品、維護圖像與規格，作為後續詢價與 quotation 的來源。</CardDescription>
                     </div>
                   </div>
                   <Button type="button" size="sm" onClick={() => setProductSubTab("form")}>
@@ -1220,7 +1226,7 @@ export default function TradePage() {
               <CardContent className="p-5 lg:p-6">
                 {!canSell ? (
                   <div className="rounded-2xl border border-dashed p-8 text-sm text-neutral-500">
-                    先到「貿易檔案」把角色設定成 Seller 或 Both，才能新增商品。
+                    請先升級方案並完成賣家身份審核，才能新增商品。
                   </div>
                 ) : (
                   <form onSubmit={createProduct} className="space-y-4">
@@ -1673,7 +1679,7 @@ export default function TradePage() {
             <div className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-neutral-200 bg-white p-4 shadow-sm">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-neutral-950">詢價工作台</h2>
-                <p className="mt-1 text-sm text-neutral-500">把 buyer 與 seller 工作區拆成子頁切換，閱讀和操作都會更專注。</p>
+                <p className="mt-1 text-sm text-neutral-500">把採購端與賣家端工作區拆成子頁切換，閱讀和操作都會更專注。</p>
               </div>
               <div className="inline-flex rounded-2xl border border-neutral-200 bg-neutral-50 p-1">
                 <button
@@ -1688,6 +1694,7 @@ export default function TradePage() {
                 <button
                   type="button"
                   onClick={() => setInquirySubTab("received")}
+                  disabled={!canSell}
                   className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                     inquirySubTab === "received" ? "bg-white text-neutral-950 shadow-sm" : "text-neutral-500"
                   }`}
@@ -1739,33 +1746,34 @@ export default function TradePage() {
                   <ShieldCheck className="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle>貿易檔案</CardTitle>
+                  <CardTitle>賣家身份檔案</CardTitle>
                   <CardDescription>
-                先建立貿易檔案，再送到 admin portal 進行身份審核。審核通過後才會開放市場、商品與詢價功能。
+                升級方案後可建立賣家身份檔案，送到 admin portal 進行審核。審核通過後才會開放商品上架與 Seller 功能。
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-5 lg:p-6">
+              {profileGateReason === "seller_plan_locked" ? (
+                <div className="rounded-xl border border-dashed p-8 text-sm text-neutral-600">
+                  你目前已可使用市場商品與詢價功能。若要申請賣家身份並上架商品，請先到方案頁升級。
+                  <div className="mt-4">
+                    <a href="/billing">
+                      <Button>前往方案計費</Button>
+                    </a>
+                  </div>
+                </div>
+              ) : (
+              <>
               {profile?.verified === false ? (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                   目前狀態：待 admin 審核。若你更新檔案內容，系統也會重新送審。
                 </div>
               ) : null}
               <form onSubmit={saveProfile} className="space-y-4">
-                <Field label="角色">
-                  <select
-                    value={profileForm.role}
-                    onChange={(e) =>
-                      setProfileForm((v) => ({ ...v, role: e.target.value as TradeRole }))
-                    }
-                    className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
-                  >
-                    <option value="buyer">Buyer</option>
-                    <option value="seller">Seller</option>
-                    <option value="both">Both</option>
-                  </select>
-                </Field>
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
+                  目前申請類型：<span className="font-medium uppercase">seller</span>
+                </div>
                 <Field label="公司 / 貿易簡介">
                   <textarea
                     value={profileForm.description}
@@ -1809,6 +1817,8 @@ export default function TradePage() {
                   {savingProfile ? "儲存中..." : "儲存檔案"}
                 </Button>
               </form>
+              </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1883,7 +1893,7 @@ function InquiryColumn({
           </div>
           <div>
             <CardTitle>{title}</CardTitle>
-            <CardDescription>{side === "buyer" ? "Buyer 視角" : "Seller 視角"}</CardDescription>
+            <CardDescription>{side === "buyer" ? "採購端視角" : "賣家視角"}</CardDescription>
           </div>
         </div>
       </CardHeader>

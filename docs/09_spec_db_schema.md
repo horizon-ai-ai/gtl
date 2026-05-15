@@ -396,7 +396,9 @@ model TradeProfile {
   updated_at       DateTime @updatedAt
 }
 
-enum TradeRole { buyer seller both }
+// 產品規則已調整為僅允許 seller 身份申請；
+// buyer 為所有登入用戶的預設能力，保留 TradeRole 僅為說明 seller profile 欄位用途。
+enum TradeRole { seller }
 
 model Product {
   id              String   @id @default(uuid()) @db.Uuid

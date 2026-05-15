@@ -3,7 +3,7 @@
 **Project**: Marketing AI Platform  
 **Status**: Working Draft  
 **Owner**: Grace Wu  
-**Last Updated**: 2026-05-13
+**Last Updated**: 2026-05-15
 
 ---
 
@@ -12,6 +12,7 @@
 | 版本 | 日期 | 變更內容 | 作者 |
 |---|---|---|---|
 | v0.1 | 2026-05-13 | 建立工程總覽 spec，整理架構、模組、環境與開發規範 | Codex |
+| v0.2 | 2026-05-15 | 更新 trade route gating 與 seller identity 模型 | Codex |
 
 ---
 
@@ -202,8 +203,12 @@ User/Admin Browser
 - trade admin operations
 
 當前 trade 規則：
-- `TradeProfile` 建立後需由 admin 審核 `verified=true`
-- 僅 verified trade user 可使用商品、詢價、quotation、通知與 trade 訂單路徑
+- 所有已登入 user 可使用市場商品瀏覽、送出詢價、buyer quotation inbox 與 buyer 通知視圖
+- seller 相關功能需同時滿足：
+  - 方案 features 含 `trade_module`
+  - 已建立 `TradeProfile`
+  - `TradeProfile.verified = true`
+- seller 路徑包含：商品 CRUD、seller quotation workspace、收到的詢價、seller 通知視圖、由 seller 觸發的 trade order handoff
 - 商品建立後直接 `published`
 - admin 對商品保留人工 pause / 總覽能力，但不做上架前審核
 

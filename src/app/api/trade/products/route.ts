@@ -2,7 +2,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok, ApiError } from "@/lib/api";
-import { assertTradeModuleAccess, assertVerifiedTradeProfile } from "@/lib/trade";
+import { assertSellerTradeAccess } from "@/lib/trade";
 import { getActiveTradeCategories, normalizeTradeCategoryName } from "@/lib/trade-categories";
 
 const imagePathSchema = z.string().refine((value) => value.startsWith("/") || /^https?:\/\//.test(value), {
@@ -66,7 +66,6 @@ export async function GET(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
 
     const url = new URL(req.url);
     const scope = url.searchParams.get("scope") ?? "market";
@@ -74,6 +73,10 @@ export async function GET(req: Request) {
     const category = url.searchParams.get("category")?.trim();
     const hsCode = url.searchParams.get("hs_code")?.trim();
     const sellerId = url.searchParams.get("seller_id")?.trim();
+
+    if (scope === "mine") {
+      await assertSellerTradeAccess(session.user.id);
+    }
 
     const items = await prisma.product.findMany({
       where: {
@@ -120,12 +123,12 @@ export async function POST(req: Request) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     const tradeProfile = await prisma.tradeProfile.findUnique({
       where: { user_id: session.user.id },
     });
-    if (!tradeProfile || (tradeProfile.role !== "seller" && tradeProfile.role !== "both")) {
+    if (!tradeProfile || tradeProfile.role !== "seller") {
       throw new ApiError("BUSINESS_RULE_VIOLATION", "Seller profile required");
     }
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ApiError, fail, handleError, ok } from "@/lib/api";
-import { assertTradeModuleAccess, assertVerifiedTradeProfile } from "@/lib/trade";
+import { assertSellerTradeAccess, assertTradeModuleAccess } from "@/lib/trade";
 import { getActiveTradeCategories, normalizeTradeCategoryName } from "@/lib/trade-categories";
 
 const variantSchema = z.object({
@@ -109,7 +109,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     await findOwnedProduct(params.id, session.user.id);
     const body = updateProductSchema.parse(await req.json());
@@ -155,7 +155,7 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
+    await assertSellerTradeAccess(session.user.id);
 
     await findOwnedProduct(params.id, session.user.id);
     await prisma.product.update({

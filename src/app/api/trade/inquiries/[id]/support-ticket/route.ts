@@ -1,13 +1,11 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/api";
-import { assertVerifiedTradeProfile } from "@/lib/trade";
 
 export async function POST(_: Request, { params }: { params: { id: string } }) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    await assertVerifiedTradeProfile(session.user.id);
 
     const inquiry = await prisma.inquiry.findFirst({
       where: {
