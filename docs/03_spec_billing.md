@@ -41,7 +41,8 @@
 | 可用模型 | Haiku | Haiku, Sonnet | All | All |
 | AI Chat | ✅ | ✅ | ✅ | ✅ |
 | 引導下單 | ✅ | ✅ | ✅ | ✅ |
-| Puck 建站 | ❌ | 1 站 | 5 站 | 無限 |
+| 商品頁建置（Trade Site Builder） | ❌ | ❌ | ✅ | ✅ |
+| Puck 視覺編輯 | ❌ | ❌ | ✅ | ✅ |
 | 自訂網域 | ❌ | ❌ | ✅ | ✅ |
 | 貿易模組 | ❌ | ❌ | ✅ | ✅ |
 | RAG 客服 | 基礎 | 基礎 | 進階 | 專屬訓練 |
@@ -84,7 +85,7 @@
 ### 4.2 降級
 - 月底生效（不退差額）
 - 立即標記 `next_plan`，下次續訂時切換
-- 多餘的 Pro 限定資料（如建站數）：保留唯讀，超出限額不能新增
+- 多餘的 Pro 限定資料（如商品頁站點數）：保留唯讀，超出限額不能新增
 
 ### 4.3 取消
 - 月底生效
@@ -191,10 +192,10 @@ UserUsage  // 見 02_spec_chat.md
 |---|---|
 | `chat.model.sonnet` | 可用 Sonnet |
 | `chat.model.opus` | 可用 Opus |
-| `pagebuilder` | Puck 建站 |
+| `pagebuilder` | Trade 內商品頁建置 / Puck 視覺編輯 |
 | `pagebuilder.custom_domain` | 自訂網域 |
 | `pagebuilder.max_sites` | 站數上限（int） |
-| `trade_module` | 開啟 seller 身份申請、商品上架與 seller quotation 流程 |
+| `trade_module` | 開啟商品頁建置、seller 身份申請、商品上架與 seller quotation 流程 |
 | `rag.advanced` | 進階 RAG |
 | `team.max_members` | 子帳號數（int） |
 | `api_access` | API 存取 |

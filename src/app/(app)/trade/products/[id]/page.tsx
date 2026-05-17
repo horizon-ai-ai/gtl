@@ -43,6 +43,7 @@ function labelSpec(key: string) {
     food_registration_no: "食品業者登錄字號",
     commission_rate: "佣金比例",
     hs_code: "條碼/HS code",
+    linked_site_url: "商品頁網址",
   };
   return labels[key] ?? key;
 }
@@ -106,6 +107,18 @@ export default async function TradeProductDetailPage({
                 ["檢測認證", product.certifications.length ? product.certifications.join(", ") : "無"],
               ]}
             />
+            {typeof (product.specs as Record<string, unknown> | null)?.linked_site_url === "string" ? (
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
+                <div className="text-sm font-medium text-neutral-700">商品一頁式網站</div>
+                <Link
+                  href={String((product.specs as Record<string, unknown>).linked_site_url)}
+                  target="_blank"
+                  className="mt-2 inline-flex text-sm font-medium text-neutral-900 underline underline-offset-4"
+                >
+                  開啟商品 landing page
+                </Link>
+              </div>
+            ) : null}
             {product.specs && typeof product.specs === "object" ? (
               <div>
                 <div className="text-sm font-medium mb-2">規格</div>

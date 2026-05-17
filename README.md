@@ -143,6 +143,7 @@ npm run admin:dev
 - Billing 基本方案切換
 - Orders 基本管理
 - 所有登入用戶可瀏覽 Trade 市場商品並送出詢價
+- 已升級 trade 方案的用戶可先測試商品頁建置與 Puck 視覺編輯
 - Trade seller 身份需先升級方案並通過 admin 審核；審核後可建立商品並直接上架
 - Trade quotation、notifications、trade lifecycle
 - Support ticket + RAG 問答
@@ -156,7 +157,7 @@ npm run admin:dev
 - email verification / reset password
 - RAG 完整向量 pipeline
 - Trade 完整 quotation entity / notification center
-- Site Builder 視覺化 editor / domain verification
+- Site Builder 已接 Puck 基礎視覺編輯，仍待深化 domain verification / 正式商品串接
 
 ## 開發注意事項
 

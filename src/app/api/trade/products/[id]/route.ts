@@ -49,6 +49,8 @@ const updateProductSchema = z.object({
       food_registration_no: z.string().max(4000).optional(),
       commission_rate: z.string().max(50).optional(),
       hs_code: z.string().max(20).optional(),
+      linked_site_id: z.string().max(120).optional(),
+      linked_site_url: z.string().max(255).optional(),
     })
     .optional(),
   price_fob_usd: z.number().int().nonnegative().optional().nullable(),

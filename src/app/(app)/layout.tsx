@@ -37,7 +37,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/settings/integrations", label: "整合設定", icon: PlugZap },
     { href: "/analytics", label: "流量分析", icon: Globe },
     { href: "/orders", label: "訂單", icon: Package },
-    { href: "/sites", label: "網站", icon: Globe },
     { href: "/trade", label: "貿易", icon: ShoppingBag },
     { href: "/billing", label: "方案計費", icon: CreditCard },
   ];

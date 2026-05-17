@@ -6,6 +6,7 @@ import { fail, handleError, ok, ApiError } from "@/lib/api";
 import { generateSiteSchema, slugifySiteName } from "@/lib/site-builder";
 import { saveSiteFiles } from "@/lib/site-assets";
 import { createTradeProductDraftFromImages } from "@/lib/trade-vision";
+import { assertTradeSiteBuilderAccess } from "@/lib/trade";
 
 const createSchema = z.object({
   name: z.string().min(2).max(120),
@@ -21,6 +22,7 @@ export async function GET() {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
+    await assertTradeSiteBuilderAccess(session.user.id);
 
     const sites = await prisma.site.findMany({
       where: { user_id: session.user.id, deleted_at: null },
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
+    await assertTradeSiteBuilderAccess(session.user.id);
     const contentType = req.headers.get("content-type") ?? "";
 
     let body: z.infer<typeof createSchema>;

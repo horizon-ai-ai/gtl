@@ -16,6 +16,12 @@ export type SiteSchema = {
   tagline: string;
   primary_color: string;
   product_images?: string[];
+  product?: {
+    linked_product_id?: string;
+    linked_product_name?: string;
+    linked_product_slug?: string;
+    linked_product_site_url?: string;
+  };
   inquiry_cta_label?: string;
   inquiry_cta_note?: string;
   seo?: {
@@ -35,6 +41,7 @@ const FALLBACK_SCHEMA: SiteSchema = {
   tagline: "用 AI 快速建立你的第一個行銷網站",
   primary_color: "#171717",
   product_images: [],
+  product: {},
   inquiry_cta_label: "立即詢價",
   inquiry_cta_note: "想了解規格、報價或合作方式，歡迎立即詢價。",
   seo: {
@@ -82,6 +89,21 @@ function parseSchema(raw: string): SiteSchema {
               .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
               .slice(0, 8)
           : FALLBACK_SCHEMA.product_images,
+        product:
+          json.product && typeof json.product === "object"
+            ? {
+                linked_product_id:
+                  typeof json.product.linked_product_id === "string" ? json.product.linked_product_id : undefined,
+                linked_product_name:
+                  typeof json.product.linked_product_name === "string" ? json.product.linked_product_name : undefined,
+                linked_product_slug:
+                  typeof json.product.linked_product_slug === "string" ? json.product.linked_product_slug : undefined,
+                linked_product_site_url:
+                  typeof json.product.linked_product_site_url === "string"
+                    ? json.product.linked_product_site_url
+                    : undefined,
+              }
+            : FALLBACK_SCHEMA.product,
         inquiry_cta_label:
           typeof json.inquiry_cta_label === "string" && json.inquiry_cta_label.trim()
             ? json.inquiry_cta_label.trim()

@@ -1,6 +1,6 @@
 # 05 — Spec: Puck Editor 網頁建置
 
-**Status**: Draft
+**Status**: In Progress
 **Owner**: Grace Wu
 **Last Updated**: 2026-04-30
 
@@ -11,6 +11,7 @@
 | 版本 | 日期 | 變更內容 | 作者 |
 |---|---|---|---|
 | v0.1 | 2026-04-30 | 初版 — Puck 整合、AI 生成、子網域發佈 | Grace Wu |
+| v0.2 | 2026-05-17 | 建站入口整合進 Trade seller workflow；有 trade 方案即可先測建站 | Codex |
 
 ---
 
@@ -238,6 +239,32 @@ SiteAnalytics {
 ---
 
 ## 13. 開放問題
+
+## 14. 商品一頁式頁面工作流
+
+目前建站需求已明確偏向「商品 landing page」而非一般公司官網，流程應調整為：
+
+1. 已升級 trade 方案的用戶進入 `Trade > 商品頁建置`
+2. 上傳商品圖 + 補少量商品賣點文字
+3. AI 生成一頁式商品頁草稿
+4. 用戶直接在頁面上編輯與調整
+5. 預覽後發布並取得 G3 內部網址
+6. 回到貿易模組，把該網址關聯到商品資料
+7. 買家從商品或市場頁可進入商品 landing page，再往下詢價
+
+### v1 實作決策
+- 建站工作台先以「草稿建立 / 站點設定 / 內容編輯」三段式完成
+- 入口收斂到 `/trade/sites`，屬於 Seller 工作流的一部分
+- `trade_module` 方案開通後即可先測建站，不必等 seller 身份審核通過
+- seller 身份審核通過後，商品上架與 seller quotation 才正式開放
+- AI 生成輸出以商品 landing page 為主
+- 頁尾固定帶 `立即詢價` CTA
+- 視覺化拖拉編輯由 Puck 接手，目前已提供 `/trade/sites/[id]/edit` 視覺編輯子頁
+
+### 目前已知斷點
+- 站點與 trade 商品仍是兩套流程，尚未自然關聯
+- 可編輯內容仍偏結構化，不是完全可視化
+- `立即詢價` 還需再更深度接到 trade inquiry context
 - Q1: 自訂網域驗證流程（DNS TXT? CNAME?）— v1.5 設計
 - Q2: 是否提供 GA / Pixel 整合 — v2
 - Q3: 模板市集（用戶可賣模板）— v3

@@ -13,6 +13,7 @@
 |---|---|---|---|
 | v0.1 | 2026-05-13 | 建立工程總覽 spec，整理架構、模組、環境與開發規範 | Codex |
 | v0.2 | 2026-05-15 | 更新 trade route gating 與 seller identity 模型 | Codex |
+| v0.3 | 2026-05-17 | 新增 trade site builder access 與 Puck 視覺編輯子頁 | Codex |
 
 ---
 
@@ -119,6 +120,7 @@ User/Admin Browser
 - `analytics/*`：GA integration / dashboard / cache / crypto
 - `admin-copilot/*`：planner / prompts / tools
 - `site-builder.ts`：site schema + generation helpers
+- `site-puck.tsx`：Puck config 與 schema/data 轉換
 
 ### 4.3 `src/components`
 - `ui/*`：shadcn-style primitives
@@ -209,6 +211,8 @@ User/Admin Browser
   - 已建立 `TradeProfile`
   - `TradeProfile.verified = true`
 - seller 路徑包含：商品 CRUD、seller quotation workspace、收到的詢價、seller 通知視圖、由 seller 觸發的 trade order handoff
+- site builder 路徑包含：`/trade/sites`、`/trade/sites/[id]/edit`
+- site builder 僅要求 `trade_module` 方案開通；不要求 seller 身份已審核
 - 商品建立後直接 `published`
 - admin 對商品保留人工 pause / 總覽能力，但不做上架前審核
 
@@ -257,13 +261,16 @@ User/Admin Browser
 ### 5.9 Site Builder Domain
 檔案：
 - `src/app/(app)/sites/**`
+- `src/app/(app)/trade/sites/**`
 - `src/app/api/sites/**`
 - `src/components/site-renderer.tsx`
 - `src/lib/site-builder.ts`
+- `src/lib/site-puck.tsx`
 
 責任：
 - 建站
 - schema generation
+- puck visual editing
 - draft/publish
 - preview
 - custom domain metadata

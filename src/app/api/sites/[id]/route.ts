@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError, ok } from "@/lib/api";
+import { assertTradeSiteBuilderAccess } from "@/lib/trade";
 
 const updateSchema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -17,6 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
+    await assertTradeSiteBuilderAccess(session.user.id);
     const body = updateSchema.parse(await req.json());
 
     const site = await prisma.site.findFirst({

@@ -13,6 +13,7 @@
 |---|---|---|---|
 | v0.1 | 2026-05-13 | 建立產品總覽 spec，整合現有 PRD 與已開發模組 | Codex |
 | v0.2 | 2026-05-15 | 更新 trade 權限模型：所有登入用戶可市場瀏覽/詢價，seller 需方案+身份審核 | Codex |
+| v0.3 | 2026-05-17 | 建站整合進 Trade；有 trade 方案可先測建站，seller 審核仍只擋商品上架/賣家流程 | Codex |
 
 ---
 
@@ -246,21 +247,24 @@
 1. 所有登入用戶可瀏覽市場商品
 2. buyer 於市場商品發送詢價
 3. 若要成為 seller，先升級方案並建立 seller trade profile
-4. admin 審核 seller 身份
-5. seller 身份通過後建立商品，商品直接進市場
-6. seller 收到通知，進 quotation workspace
-7. seller 生成制式 quotation 並送出
-8. buyer 在 quotation inbox 查看
-9. admin 可在 trade quotation / ops 看到對接進度
-10. admin 或 seller 觸發成立訂單
-11. user portal 顯示 trade order lifecycle
+4. 已升級 trade 方案者可先進 `Trade > 商品頁建置`
+5. admin 審核 seller 身份
+6. seller 身份通過後建立商品，商品直接進市場
+7. seller 收到通知，進 quotation workspace
+8. seller 生成制式 quotation 並送出
+9. buyer 在 quotation inbox 查看
+10. admin 可在 trade quotation / ops 看到對接進度
+11. admin 或 seller 觸發成立訂單
+12. user portal 顯示 trade order lifecycle
 
 ### 5.3 建站流程
-1. user 建立 site
-2. AI 產生初版 landing page schema
-3. user 編輯文案與 sections
-4. user 預覽
-5. user 發佈為 `/s/{slug}` 或 custom domain
+1. 已升級 trade 方案的用戶進入 `Trade > 商品頁建置`
+2. 上傳商品圖與少量商品說明
+3. AI 產生初版 landing page schema
+4. user 於工作台或 Puck 視覺編輯器調整文案與 sections
+5. user 預覽
+6. user 發佈為 `/s/{slug}` 或 custom domain
+7. 回到商品資料把 landing page 關聯到商品
 
 ### 5.4 客服流程
 1. user 先在 support 頁問 RAG
@@ -304,7 +308,9 @@
 - `anomaly_detection`
 
 ### 7.2 目前策略
-- Trade 市場瀏覽與詢價對所有登入用戶開放；seller 身份申請、商品上架與 seller quotation 屬於進階方案能力
+- Trade 市場瀏覽與詢價對所有登入用戶開放
+- `trade_module` 開通後可先測商品頁建置
+- seller 身份申請、商品上架與 seller quotation 屬於進階方案能力
 - Admin / super_admin 可做營運測試與繞過
 
 ---

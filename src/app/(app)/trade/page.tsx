@@ -33,6 +33,7 @@ type TradeProfile = {
 
 type TradeAccess = {
   allowed: boolean;
+  site_builder_allowed: boolean;
   seller_allowed: boolean;
   profile_exists: boolean;
   profile_verified: boolean;
@@ -48,6 +49,13 @@ type TradeFilters = {
 type TradeCatalog = {
   categories: string[];
   hs_codes: string[];
+};
+
+type SellerSite = {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
 };
 
 type Product = {
@@ -160,6 +168,8 @@ const EMPTY_PRODUCT = {
   food_registration_no: "",
   commission_rate: "",
   certifications: "",
+  linked_site_id: "",
+  linked_site_url: "",
   status: "published",
 };
 
@@ -190,6 +200,7 @@ export default function TradePage() {
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE);
   const [myProducts, setMyProducts] = useState<Product[]>([]);
   const [marketProducts, setMarketProducts] = useState<Product[]>([]);
+  const [sellerSites, setSellerSites] = useState<SellerSite[]>([]);
   const [sentInquiries, setSentInquiries] = useState<Inquiry[]>([]);
   const [receivedInquiries, setReceivedInquiries] = useState<Inquiry[]>([]);
   const [productForm, setProductForm] = useState(EMPTY_PRODUCT);
@@ -227,6 +238,7 @@ export default function TradePage() {
         loadProducts(nextAccess.seller_allowed),
         loadInquiries("sent"),
         loadInquiries("received"),
+        ...(nextAccess.seller_allowed ? [loadSellerSites()] : []),
       ]);
       setLoading(false);
     })();
@@ -236,7 +248,7 @@ export default function TradePage() {
     const res = await fetch("/api/trade/access");
     const json = await res.json();
     const nextAccess = (json.data ??
-      { allowed: false, seller_allowed: false, profile_exists: false, profile_verified: false, reason: "seller_plan_locked" }) as TradeAccess;
+      { allowed: false, site_builder_allowed: false, seller_allowed: false, profile_exists: false, profile_verified: false, reason: "seller_plan_locked" }) as TradeAccess;
     setAccess(nextAccess);
     return nextAccess;
   }
@@ -260,6 +272,18 @@ export default function TradePage() {
         capacity: nextProfile.capacity ?? "",
       });
     }
+  }
+
+  async function loadSellerSites() {
+    const res = await fetch("/api/sites");
+    if (!res.ok) return;
+    const json = await res.json();
+    setSellerSites((json.data ?? []).map((site: SellerSite) => ({
+      id: site.id,
+      name: site.name,
+      slug: site.slug,
+      status: site.status,
+    })));
   }
 
   async function loadCatalog() {
@@ -372,6 +396,8 @@ export default function TradePage() {
         liability_insurance: productForm.liability_insurance || undefined,
         food_registration_no: productForm.food_registration_no || undefined,
         commission_rate: productForm.commission_rate || undefined,
+        linked_site_id: productForm.linked_site_id || undefined,
+        linked_site_url: productForm.linked_site_url || undefined,
         ...draftAttributes,
       },
       price_fob_usd: parseOptionalInt(productForm.price_fob_usd),
@@ -451,6 +477,8 @@ export default function TradePage() {
       liability_insurance: readSpec(product.specs, "liability_insurance"),
       food_registration_no: readSpec(product.specs, "food_registration_no"),
       commission_rate: readSpec(product.specs, "commission_rate"),
+      linked_site_id: readSpec(product.specs, "linked_site_id"),
+      linked_site_url: readSpec(product.specs, "linked_site_url"),
       certifications: (product.certifications ?? []).join(", "),
       status: product.status,
     });
@@ -705,6 +733,7 @@ export default function TradePage() {
   }
 
   const canSell = access?.seller_allowed ?? false;
+  const canBuildSites = access?.site_builder_allowed ?? false;
   const profileGateReason = access?.reason;
 
   useEffect(() => {
@@ -742,6 +771,17 @@ export default function TradePage() {
                     <Package2 className="h-4 w-4" />
                     <span>貿易訂單</span>
                   </Link>
+                  {canBuildSites ? (
+                    <Link href="/trade/sites" className="trade-quick-link">
+                      <Store className="h-4 w-4" />
+                      <span>商品頁建置</span>
+                    </Link>
+                  ) : (
+                    <a href="/billing" className="trade-quick-link">
+                      <Store className="h-4 w-4" />
+                      <span>賣家建站</span>
+                    </a>
+                  )}
                   {canSell ? (
                     <Link href="/trade/quotations" className="trade-quick-link">
                       <ScrollText className="h-4 w-4" />
@@ -767,6 +807,10 @@ export default function TradePage() {
                   <div className="trade-quick-link cursor-not-allowed opacity-55">
                     <Package2 className="h-4 w-4" />
                     <span>貿易訂單</span>
+                  </div>
+                  <div className="trade-quick-link cursor-not-allowed opacity-55">
+                    <Store className="h-4 w-4" />
+                    <span>賣家建站</span>
                   </div>
                   <div className="trade-quick-link cursor-not-allowed opacity-55">
                     <ScrollText className="h-4 w-4" />
@@ -1170,6 +1214,17 @@ export default function TradePage() {
                               {product.description}
                             </p>
                           )}
+                          {readSpec(product.specs, "linked_site_url") ? (
+                            <div className="mt-3">
+                              <Link
+                                href={readSpec(product.specs, "linked_site_url")}
+                                target="_blank"
+                                className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-100"
+                              >
+                                查看商品頁
+                              </Link>
+                            </div>
+                          ) : null}
                           {product.images?.length > 1 ? (
                             <div className="mt-3 flex flex-wrap gap-2">
                               {product.images.slice(1, 5).map((image, index) => (
@@ -1273,6 +1328,51 @@ export default function TradePage() {
                       </Field>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
+                      <Field label="關聯商品頁">
+                        <select
+                          value={productForm.linked_site_id}
+                          onChange={(e) => {
+                            const siteId = e.target.value;
+                            const site = sellerSites.find((item) => item.id === siteId);
+                            setProductForm((v) => ({
+                              ...v,
+                              linked_site_id: siteId,
+                              linked_site_url: site ? `/s/${site.slug}` : "",
+                            }));
+                          }}
+                          className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                        >
+                          <option value="">未關聯商品頁</option>
+                          {sellerSites.map((site) => (
+                            <option key={site.id} value={site.id}>
+                              {site.name} · /s/{site.slug}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="商品頁網址">
+                        <div className="space-y-2">
+                          <Input
+                            value={productForm.linked_site_url}
+                            onChange={(e) => setProductForm((v) => ({ ...v, linked_site_url: e.target.value }))}
+                            placeholder="/s/your-site-slug"
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <Link href="/trade/sites" className="text-xs font-medium text-neutral-600 underline underline-offset-4">
+                              前往商品頁建置
+                            </Link>
+                            {productForm.linked_site_url ? (
+                              <Link
+                                href={productForm.linked_site_url}
+                                target="_blank"
+                                className="text-xs font-medium text-neutral-600 underline underline-offset-4"
+                              >
+                                預覽已關聯頁面
+                              </Link>
+                            ) : null}
+                          </div>
+                        </div>
+                      </Field>
                       <Field label="價格（USD）">
                         <Input
                           value={productForm.price_fob_usd}

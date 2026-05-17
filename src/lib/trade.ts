@@ -4,6 +4,7 @@ import { ApiError } from "./api";
 
 export type TradeAccessState = {
   allowed: boolean;
+  site_builder_allowed: boolean;
   seller_allowed: boolean;
   profile_exists: boolean;
   profile_verified: boolean;
@@ -46,6 +47,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
   if (!user) {
     return {
       allowed: false,
+      site_builder_allowed: false,
       seller_allowed: false,
       profile_exists: false,
       profile_verified: false,
@@ -56,6 +58,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
   if (user.role === "admin" || user.role === "super_admin") {
     return {
       allowed: true,
+      site_builder_allowed: true,
       seller_allowed: true,
       profile_exists: true,
       profile_verified: true,
@@ -67,6 +70,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
   if (!planAllowed) {
     return {
       allowed: true,
+      site_builder_allowed: false,
       seller_allowed: false,
       profile_exists: false,
       profile_verified: false,
@@ -77,6 +81,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
   if (!user.trade_profile) {
     return {
       allowed: true,
+      site_builder_allowed: true,
       seller_allowed: false,
       profile_exists: false,
       profile_verified: false,
@@ -87,6 +92,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
   if (!user.trade_profile.verified) {
     return {
       allowed: true,
+      site_builder_allowed: true,
       seller_allowed: false,
       profile_exists: true,
       profile_verified: false,
@@ -96,6 +102,7 @@ export async function getTradeAccessState(userId: string): Promise<TradeAccessSt
 
   return {
     allowed: true,
+    site_builder_allowed: true,
     seller_allowed: true,
     profile_exists: true,
     profile_verified: true,
@@ -148,4 +155,24 @@ export async function assertSellerTradeAccess(userId: string) {
 
 export async function assertVerifiedTradeProfile(userId: string) {
   return assertSellerTradeAccess(userId);
+}
+
+export async function assertTradeSiteBuilderAccess(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      role: true,
+    },
+  });
+
+  if (!user) {
+    throw new ApiError("UNAUTHORIZED", "User not found");
+  }
+
+  if (user.role === "admin" || user.role === "super_admin") return;
+
+  const planAllowed = await hasFeature(userId, "trade_module");
+  if (!planAllowed) {
+    throw new ApiError("PLAN_FEATURE_LOCKED", "Site builder requires a subscribed trade plan");
+  }
 }
