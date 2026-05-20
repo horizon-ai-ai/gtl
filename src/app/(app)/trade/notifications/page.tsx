@@ -113,7 +113,6 @@ export default async function TradeNotificationsPage() {
   const sellerAccess = (await getTradeAccessState(session.user.id)).seller_allowed;
 
   const columns = await getInquiryColumnSupport();
-  const quotedPrice = columns.quoted_price ? `i."quoted_price"` : `NULL::integer`;
   const quotationVersion = columns.quotation_version
     ? `i."quotation_version"`
     : `CASE
