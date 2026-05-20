@@ -6,6 +6,7 @@
     "dev": "rm -rf .next && PORT=3000 node scripts/ensure-dev-port.mjs && next dev -p 3000",
     "admin:dev": "rm -rf .next-admin-dev && PORT=3001 node scripts/ensure-dev-port.mjs && NEXT_DIST_DIR=.next-admin-dev next dev -p 3001",
     "build": "NEXT_DIST_DIR=.next-build next build",
+    "vercel-build": "prisma generate && next build",
     "start": "NEXT_DIST_DIR=.next-build next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
