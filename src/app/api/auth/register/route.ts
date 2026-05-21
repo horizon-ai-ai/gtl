@@ -5,6 +5,20 @@ import { prisma } from "@/lib/db";
 import { ok, handleError, ApiError } from "@/lib/api";
 import { lookupTaxId, validateTaxIdFormat } from "@/lib/gcis";
 import { ensureDefaultSubscription } from "@/lib/subscriptions";
+import { issueToken } from "@/lib/auth/tokens";
+import { sendVerifyEmail } from "@/lib/auth/emails";
+
+async function dispatchVerifyEmail(userId: string, email: string) {
+  try {
+    const { token } = await issueToken(userId, "verify");
+    await sendVerifyEmail(email, token);
+  } catch (err) {
+    console.error("[register] failed to dispatch verification email", {
+      user_id: userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 const baseSchema = z.object({
   email: z.string().email(),
@@ -71,6 +85,7 @@ export async function POST(req: NextRequest) {
         include: { company: true },
       });
       await ensureDefaultSubscription(user.id);
+      await dispatchVerifyEmail(user.id, user.email);
       return ok({ user_id: user.id, type: user.type, company: user.company });
     }
 
@@ -83,6 +98,7 @@ export async function POST(req: NextRequest) {
       },
     });
     await ensureDefaultSubscription(user.id);
+    await dispatchVerifyEmail(user.id, user.email);
     return ok({ user_id: user.id, type: user.type });
   } catch (err) {
     return handleError(err);
