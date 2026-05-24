@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { ok, handleError } from "@/lib/api";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const plans = await prisma.plan.findMany({
