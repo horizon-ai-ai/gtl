@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ok, fail, handleError, ApiError } from "@/lib/api";
 import { ensureDefaultSubscription } from "@/lib/subscriptions";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 const patchSchema = z.discriminatedUnion("action", [
@@ -19,6 +20,23 @@ const patchSchema = z.discriminatedUnion("action", [
 
 function addDays(base: Date, days: number) {
   return new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+type SubscriptionWithPlan = Prisma.SubscriptionGetPayload<{ include: { plan: true } }>;
+
+function serializeSubscription(sub: SubscriptionWithPlan) {
+  return {
+    status: sub.status,
+    current_period_start: sub.current_period_start,
+    current_period_end: sub.current_period_end,
+    cancel_at_period_end: sub.cancel_at_period_end,
+    plan: {
+      code: sub.plan.code,
+      name: sub.plan.name,
+      price_monthly: sub.plan.price_monthly,
+      monthly_credits: Number(sub.plan.monthly_credits),
+    },
+  };
 }
 
 export async function GET() {
@@ -64,7 +82,7 @@ export async function PATCH(req: Request) {
         data: { cancel_at_period_end: true },
         include: { plan: true },
       });
-      return ok(updated);
+      return ok(serializeSubscription(updated));
     }
 
     if (body.action === "resume") {
@@ -74,7 +92,7 @@ export async function PATCH(req: Request) {
         data: { cancel_at_period_end: false },
         include: { plan: true },
       });
-      return ok(updated);
+      return ok(serializeSubscription(updated));
     }
 
     const nextPlan = activePlans.find((plan) => plan.code === body.plan_code);
@@ -127,7 +145,7 @@ export async function PATCH(req: Request) {
       });
     }
 
-    return ok(subscription);
+    return ok(serializeSubscription(subscription));
   } catch (err) {
     return handleError(err);
   }
