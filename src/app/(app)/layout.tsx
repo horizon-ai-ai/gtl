@@ -6,10 +6,8 @@ import {
   MessageSquare,
   Package,
   CreditCard,
-  Globe,
   ShoppingBag,
   LifeBuoy,
-  PlugZap,
   LogOut,
 } from "lucide-react";
 
@@ -34,8 +32,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const nav = [
     { href: "/chat", label: "對話", icon: MessageSquare },
     { href: "/support", label: "客服知識庫", icon: LifeBuoy },
-    { href: "/settings/integrations", label: "整合設定", icon: PlugZap },
-    { href: "/analytics", label: "流量分析", icon: Globe },
     { href: "/orders", label: "訂單", icon: Package },
     { href: "/trade", label: "貿易", icon: ShoppingBag },
     { href: "/billing", label: "方案計費", icon: CreditCard },
