@@ -5,7 +5,7 @@ function appUrl(): string {
 }
 
 export async function sendPasswordResetEmail(to: string, token: string) {
-  const link = `${appUrl()}/auth/reset?token=${encodeURIComponent(token)}`;
+  const link = `${appUrl()}/reset?token=${encodeURIComponent(token)}`;
   const subject = "Reset your password";
   const text = [
     "We received a request to reset your password.",
@@ -23,7 +23,7 @@ export async function sendPasswordResetEmail(to: string, token: string) {
 }
 
 export async function sendVerifyEmail(to: string, token: string) {
-  const link = `${appUrl()}/auth/verify?token=${encodeURIComponent(token)}`;
+  const link = `${appUrl()}/verify?token=${encodeURIComponent(token)}`;
   const subject = "Verify your email";
   const text = [
     "Welcome! Please verify your email address.",
