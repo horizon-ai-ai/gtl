@@ -30,13 +30,19 @@ The system SHALL accept `GET /api/auth/verify-email?token=<plaintext>`. When the
 
 ### Requirement: Re-verification is idempotent
 
-The system SHALL, when `GET /api/auth/verify-email` receives a token whose user already has `email_verified_at` set, return `200 { data: { user_id, already_verified: true } }` without modifying the user record. This applies whether the token row is still unconsumed or already consumed, provided `expires_at > now`.
+The system SHALL, when `GET /api/auth/verify-email` receives a token whose user already has `email_verified_at` set, return `200 { data: { user_id, already_verified: true } }` without modifying the user record. This check takes precedence over both the consumed-state and the expiry checks: it applies whether the token row is unconsumed or consumed, and whether or not `expires_at` has passed. Rationale: once a user is verified, a repeat click on any of their verification links (e.g. an old one surfaced from email history) is a success from the user's perspective, not an error.
 
 #### Scenario: Clicking the link again after success
 
 - **WHEN** a user with `email_verified_at` already set clicks the same verification link a second time
 - **THEN** the response is `200` with body containing `data.already_verified = true`
 - **AND** `User.email_verified_at` is unchanged from its prior value (same exact timestamp)
+
+#### Scenario: Already-verified user clicks an expired link
+
+- **WHEN** a user with `email_verified_at` already set clicks a verification link whose `expires_at` is in the past
+- **THEN** the response is `200` with body containing `data.already_verified = true` (the already-verified check precedes the expiry check)
+- **AND** `User.email_verified_at` is unchanged
 
 ### Requirement: Re-issuing a verification token supersedes prior unconsumed verification tokens
 

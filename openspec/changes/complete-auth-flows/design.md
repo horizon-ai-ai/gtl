@@ -33,8 +33,8 @@ NextAuth supports two session strategies: `"jwt"` (stateless, fast, no DB read o
 
 We will stay on `"jwt"` and add our own session-tracking layer:
 
-1. NextAuth's `events.signIn` callback fires after a successful credentials sign-in. It will create a `Session` row with `refresh_token_hash` set to a fresh random hash (the credentials provider issues no refresh token, so this column holds an opaque session secret we never reveal — semantically a session secret hash; we keep the existing column name to avoid a rename migration), `expires_at` set to `now + 30 days` to match NextAuth's `session.maxAge`, and `ip` / `user_agent` taken from the request context.
-2. The created row's id is returned from the `jwt` callback as a `sid` claim on the token.
+1. The `Session` row is created **inside the `jwt` callback**, gated on `account?.provider === "credentials"`, with `refresh_token_hash` set to a fresh random hash (the credentials provider issues no refresh token, so this column holds an opaque session secret we never reveal — semantically a session secret hash; we keep the existing column name to avoid a rename migration), `expires_at` set to `now + 30 days` to match NextAuth's `session.maxAge`, and `ip` / `user_agent` taken from the request context. (The original plan was to use `events.signIn`, but Auth.js v5 fires that event *after* the JWT is already encoded — too late to write the new row's id into the token. The `jwt` callback is the only hook that runs before signing, so the row creation lives there.)
+2. The created row's id is written onto the token as a `sid` claim in that same `jwt` callback pass.
 3. The `session` callback runs on every authenticated request. It will look up `Session` by id, reject (return an empty session) if `revoked_at` is set or `expires_at < now`, and refresh a `last_seen_at` column at most once per minute to keep DB writes bounded.
 4. Revoking a session sets `revoked_at = now`. The next request bearing that JWT fails at the `session` callback and the user is logged out.
 
@@ -108,14 +108,14 @@ The existing `Session` model gains a `last_seen_at DateTime?` column and an inde
 - Unit test: `consumeToken` rejects unknown / expired / already-consumed tokens. (Test infra is Jest per `package.json` — confirm during apply; if absent, add a minimal Jest config alongside.)
 - The four roadmap §3.1 acceptance bullets pass (excluding the "UI optional in this batch" parts).
 
-**Scope boundaries (in scope):** five HTTP routes listed above, two Prisma models, one `Session` model addition, sign-in event hook in `src/lib/auth.ts`, register-route hook, two email helpers.
+**Scope boundaries (in scope):** five HTTP routes listed above, two Prisma models, one `Session` model addition, the `jwt`-callback session-row hook in `src/lib/auth.ts`, register-route hook, two email helpers.
 
 **Scope boundaries (out of scope):** UI pages, rate limiting, login lockout, disposable email block, LINE login, OAuth-session listing, 2FA, token cleanup cron, resend-verification endpoint.
 
 ## Risks / Trade-offs
 
 - [JWT sessions can outlive `Session.revoked_at` for up to one request] → The `session` callback runs on every authenticated request and rejects revoked sessions; the gap is bounded by request duration, not by JWT TTL.
-- [Sign-in event runs after the JWT is already minted — `sid` claim assignment depends on event ordering] → NextAuth guarantees the `jwt` callback (where we set `sid`) runs after `events.signIn`; verify in the apply phase by inspecting a freshly issued JWT in dev.
+- [`events.signIn` fires after the JWT is already encoded, so it cannot write `sid` onto the token] → Resolved during implementation: the `Session` row is created inside the `jwt` callback (gated on `account.provider === "credentials"`), which is the only hook that runs before the token is signed. Confirmed by inspecting a freshly issued JWT in dev — the `sid` claim is present and matches the new `Session.id`.
 - [Per-request DB read in the `session` callback is a latency tax on every authenticated route] → Index `Session(user_id, revoked_at, expires_at)` keeps the lookup O(log n). `last_seen_at` updates are throttled to once-per-minute to keep write pressure low.
 - [Returning identical `200 ok` for unknown emails on forgot-password can hide misconfigured email forwarders] → We log the no-match case server-side (`console.info("[forgot-password:no-match]", emailMaskedHash)`) for operator visibility without leaking to the client.
 - [`Session.refresh_token_hash` column is being repurposed as a session secret hash without rename] → Documented in the column comment; a future rename migration is acceptable but not blocking.
@@ -129,5 +129,5 @@ The existing `Session` model gains a `last_seen_at DateTime?` column and an inde
 
 ## Open Questions
 
-- Where do the reset/verify link target URLs point? `${APP_URL}/auth/reset` and `${APP_URL}/auth/verify` are assumed — confirm `APP_URL` env var name during apply (the codebase already references `NEXT_PUBLIC_APP_URL` in places; we should reuse, not introduce a new var).
+- ~~Where do the reset/verify link target URLs point? confirm `APP_URL` env var name during apply.~~ **Resolved:** `src/lib/auth/emails.ts` uses `NEXT_PUBLIC_APP_URL` (defaulting to `http://localhost:3000`), reusing the existing var rather than introducing a new one. Documented in `.env.example`.
 - Should `email_verified_at` be a hard gate or a soft warning for paid features? Roadmap §6 open question; out of scope here but the column being set correctly is the prerequisite for whichever answer wins.

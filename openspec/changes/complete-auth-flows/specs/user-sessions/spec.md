@@ -43,13 +43,20 @@ The system SHALL accept `GET /api/auth/sessions` from an authenticated user and 
 
 ### Requirement: Authenticated users can revoke a session by id
 
-The system SHALL accept `DELETE /api/auth/sessions/:id` from an authenticated user. When `:id` matches a `Session` row whose `user_id` equals the caller's id, the system SHALL set `revoked_at = now` on that row and respond `200 { data: {} }`. When `:id` does not match a row, or matches a row belonging to a different user, the system SHALL respond `404 RESOURCE_NOT_FOUND` without disclosing which case applied.
+The system SHALL accept `DELETE /api/auth/sessions/:id` from an authenticated user. When `:id` matches a `Session` row whose `user_id` equals the caller's id **and whose `revoked_at` is currently null**, the system SHALL set `revoked_at = now` on that row and respond `200 { data: {} }`. In every other case — `:id` does not match a row, matches a row belonging to a different user, or matches one of the caller's own rows that is already revoked — the system SHALL respond `404 RESOURCE_NOT_FOUND` without disclosing which case applied. The operation is therefore not idempotent: a repeat `DELETE` on an already-revoked id returns `404`, not `200`. This is acceptable because the observable end state (that session is revoked) is identical either way.
 
-#### Scenario: Revoking own session succeeds and is idempotent
+#### Scenario: Revoking an active own session succeeds
 
 - **GIVEN** user `u_123` is authenticated and a `Session` row `s_other` exists with `user_id = "u_123"` and `revoked_at` null
 - **WHEN** the user sends `DELETE /api/auth/sessions/s_other`
 - **THEN** the response is `200` and the row `s_other` has `revoked_at` set to a timestamp within 5 seconds of now
+
+#### Scenario: Repeat DELETE on an already-revoked own session returns 404
+
+- **GIVEN** user `u_123` is authenticated and a `Session` row `s_done` exists with `user_id = "u_123"` and `revoked_at` already set
+- **WHEN** the user sends `DELETE /api/auth/sessions/s_done`
+- **THEN** the response is `404` with error code `RESOURCE_NOT_FOUND`
+- **AND** the row `s_done` keeps its original `revoked_at` value (it is not re-stamped)
 
 #### Scenario: Revoking another user's session returns 404
 
