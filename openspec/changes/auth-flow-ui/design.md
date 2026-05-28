@@ -70,6 +70,21 @@ and `email_verified_at` is null; otherwise it no-ops and logs a masked-email lin
 already guaranteed by the existing `issueToken` rule in the email-verification spec, so this endpoint
 inherits it without restating the transaction.
 
+### Jest projects split (node + jsdom) for React Testing Library
+
+The existing `jest.config.js` uses `testEnvironment: "node"` with `jsx: "preserve"` — fine for the
+API and lib `.test.ts` files but unable to render JSX. To add component tests without disrupting the
+existing suite, the config is restructured into Jest `projects`: a `node` project keeps the existing
+`*.test.ts` matcher unchanged, and a new `dom` project (`testEnvironment: "jsdom"`) picks up
+`*.test.tsx` and uses the same `ts-jest` transform with `jsx: "react-jsx"` so JSX compiles. A new
+`jest.setup.dom.ts` registers `@testing-library/jest-dom` matchers via `setupFilesAfterEnv`.
+New dev deps: `@testing-library/react`, `@testing-library/jest-dom`, `@testing-library/user-event`,
+`jest-environment-jsdom`. Tradeoff: flipping the shared transform to `jsx: "react-jsx"` is safe —
+node tests don't render JSX, so only `.tsx` rendering changes; existing `.test.ts` behavior is
+preserved. Both projects also set `modulePathIgnorePatterns: ["<rootDir>/.claude/worktrees/"]` so
+agent-driven git worktrees (used by the `superpowers:using-git-worktrees` pattern) don't trigger
+`jest-haste-map` duplicate-package warnings when they ship their own `package.json` / `node_modules`.
+
 ## Implementation Contract
 
 **Behavior:**
@@ -111,10 +126,16 @@ not a hard error.
 - Manual: registering, clicking the emailed verify link, reaching `/verify` shows success and sets
   `email_verified_at`. Requesting a reset, clicking the emailed link, setting a new password at
   `/reset` redirects to `/login` and the new password authenticates.
+- New component tests (`src/app/(auth)/{forgot,reset,verify}/page.test.tsx`) pass under the new
+  jsdom Jest project. They lock: the reset page's validation gating (submit disabled unless ≥ 8
+  chars and matching), the verify page's loading / verified / already-verified / dead branches and
+  the ran-once `fetch` guard under `<StrictMode>`, the verify resend control's signed-in (button
+  only) vs logged-out (email field shown) shape, and the forgot page's neutral confirmation.
 
-**Scope boundaries:** in scope — the three pages, the resend endpoint + its test, the login link, and
-the two email-link string edits. Out of scope — verification enforcement, session-management UI, and
-rate limiting (see Non-Goals).
+**Scope boundaries:** in scope — the three pages, the resend endpoint + its test, the login link,
+the two email-link string edits, and the Jest jsdom project + RTL component tests for the three
+pages. Out of scope — verification enforcement, session-management UI, and rate limiting (see
+Non-Goals).
 
 ## Risks / Trade-offs
 

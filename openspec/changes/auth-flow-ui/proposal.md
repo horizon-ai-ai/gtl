@@ -10,6 +10,7 @@ The §3.1 auth recovery and verification endpoints (forgot-password, reset-passw
 - Add endpoint `POST /api/auth/resend-verification` — anticipated by the email-verification spec. Re-issues a verification token for an active, unverified user; identifies the user by session when signed in, otherwise by an `email` field; returns `200` regardless of whether a user matched (anti-enumeration), mirroring forgot-password.
 - Add a "忘記密碼？" link on the login page pointing to `/forgot`.
 - Update the reset and verify email link paths in the email helpers from `/auth/reset` and `/auth/verify` to `/reset` and `/verify`, matching the new group-relative routes.
+- Add Jest projects (node + jsdom) and React Testing Library to the dev stack, plus component tests for the three pages that lock the verify states + ran-once fetch guard, the reset validation gating, the forgot neutral confirmation, and the verify resend signed-in vs logged-out branches.
 
 ## Capabilities
 
@@ -33,7 +34,13 @@ The §3.1 auth recovery and verification endpoints (forgot-password, reset-passw
     - src/app/(auth)/verify/page.tsx
     - src/app/api/auth/resend-verification/route.ts
     - src/app/api/auth/resend-verification/route.test.ts
+    - src/app/(auth)/forgot/page.test.tsx
+    - src/app/(auth)/reset/page.test.tsx
+    - src/app/(auth)/verify/page.test.tsx
+    - jest.setup.dom.ts
   - Modified:
     - src/app/(auth)/login/page.tsx
     - src/lib/auth/emails.ts
+    - jest.config.js
+    - package.json
   - Removed: (none)
