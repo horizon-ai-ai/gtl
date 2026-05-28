@@ -124,57 +124,89 @@ describe("inquiryToPIData()", () => {
     expect(JSON.parse(JSON.stringify(inquiry))).toEqual(snapshot);
   });
 
+  it("maps the buyer into the customer block (contact name + company name)", () => {
+    const data = inquiryToPIData(makeInquiry());
+    expect(data.customer.name).toBe("Yamada Taro");
+    expect(data.customer.company_name).toBe("Tokyo Trading Co., Ltd.");
+    expect(data.customer.street_address).toBe("東京都千代田区丸の内 2-7-2");
+    expect(data.customer.phone).toBe("+81-3-1234-5678");
+  });
+
   it("renders customer block as em-dash when buyer.company is null", () => {
     const inquiry = makeInquiry({
       buyer: { ...makeInquiry().buyer, company: null },
     });
     const data = inquiryToPIData(inquiry);
-    expect(data.customer.name).toBe("Yamada Taro"); // falls back to display_name
-    expect(data.customer.address).toBe("—");
-    expect(data.customer.contact_phone).toBe("—");
+    expect(data.customer.name).toBe("Yamada Taro"); // contact falls back to display_name
+    expect(data.customer.company_name).toBe("Yamada Taro"); // company falls back to display_name
+    expect(data.customer.street_address).toBe("—");
+    expect(data.customer.phone).toBe("—");
   });
 
-  it("renders customer name as em-dash when company, display_name, and email are all missing", () => {
+  it("renders customer fields as em-dash when company, display_name, and email are all missing", () => {
     const baseBuyer = makeInquiry().buyer;
     const inquiry = makeInquiry({
       buyer: { ...baseBuyer, company: null, display_name: null, email: "" },
     });
     const data = inquiryToPIData(inquiry);
     expect(data.customer.name).toBe("—");
-    expect(data.customer.address).toBe("—");
+    expect(data.customer.company_name).toBe("—");
+    expect(data.customer.street_address).toBe("—");
   });
 
-  it("renders line-item description as em-dash when product is null", () => {
+  it("renders line-item description and unit of measure as em-dash when product is null", () => {
     const inquiry = makeInquiry({ product: null });
     const data = inquiryToPIData(inquiry);
     expect(data.line_items).toHaveLength(1);
     expect(data.line_items[0].description).toBe("—");
-    expect(data.line_items[0].unit).toBe("—");
+    expect(data.line_items[0].unit_of_measure).toBe("—");
   });
 
-  it("flows quoted_price and quoted_quantity into the single line-items row", () => {
+  it("flows quoted_price and quoted_quantity into the single line-items row and totals", () => {
     const inquiry = makeInquiry({ quoted_price: 15, quoted_quantity: 1000 });
     const data = inquiryToPIData(inquiry);
     expect(data.line_items).toHaveLength(1);
-    expect(data.line_items[0].quantity).toBe("1000");
+    expect(data.line_items[0].qty).toBe("1000");
     expect(data.line_items[0].unit_price).toBe("15");
-    expect(data.line_items[0].amount).toBe("15000");
+    expect(data.line_items[0].total_amount).toBe("15000");
+    expect(data.totals.subtotal).toBe("15000");
+    expect(data.totals.total).toBe("15000");
   });
 
   it("falls back to inquiry.quantity when quoted_quantity is missing", () => {
     const inquiry = makeInquiry({ quoted_quantity: null, quoted_price: null });
     const data = inquiryToPIData(inquiry);
-    expect(data.line_items[0].quantity).toBe("100");
+    expect(data.line_items[0].qty).toBe("100");
     expect(data.line_items[0].unit_price).toBe("—");
-    expect(data.line_items[0].amount).toBe("—");
+    expect(data.line_items[0].total_amount).toBe("—");
   });
 
-  it("renders schema-absent fields (invoice_no, freight_type, port_of_embarkation) as em-dash", () => {
+  it("maps trade fields into terms-of-sale and additional details", () => {
+    const data = inquiryToPIData(makeInquiry());
+    expect(data.terms_of_sale.delivery_terms).toBe("FOB");
+    expect(data.terms_of_sale.payment_terms).toBe("T/T 30%/70%");
+    expect(data.terms_of_sale.comments).toBe("Thank you for your inquiry.");
+    expect(data.additional.country_of_origin).toBe("TW");
+    expect(data.additional.port_of_discharge).toBe("Port of Tokyo");
+    expect(data.totals.currency).toBe("USD");
+  });
+
+  it("renders schema-absent fields as em-dash", () => {
     const data = inquiryToPIData(makeInquiry());
     expect(data.metadata.invoice_no).toBe("—");
     expect(data.metadata.expiration_date).toBe("—");
     expect(data.shipping.freight_type).toBe("—");
-    expect(data.shipping.port_of_embarkation).toBe("—");
+    expect(data.shipping.est_cubic_weight).toBe("—");
+    expect(data.line_items[0].part_number).toBe("—");
+    expect(data.line_items[0].tax).toBe("—");
+    expect(data.totals.freight).toBe("—");
+    expect(data.additional.port_of_embarkation).toBe("—");
+    expect(data.additional.reason_for_export).toBe("—");
     expect(data.signature.typed_name).toBe("—");
+  });
+
+  it("sets the signature company to the seller's company", () => {
+    const data = inquiryToPIData(makeInquiry());
+    expect(data.signature.company_name).toBe("Horizon AI Trading");
   });
 });

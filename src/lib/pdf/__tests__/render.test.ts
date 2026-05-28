@@ -5,113 +5,134 @@ import { renderProFormaInvoice } from "../render";
 import { dash, type PIData } from "../pi-data";
 
 function emDashAll(): PIData {
+  const d = () => dash(null);
   return {
-    metadata: {
-      invoice_no: dash(null),
-      invoice_date: dash(null),
-      expiration_date: dash(null),
-      customer_id: dash(null),
-    },
+    metadata: { date: d(), expiration_date: d(), invoice_no: d(), customer_id: d() },
     seller: {
-      name: dash(null),
-      address: dash(null),
-      contact_name: dash(null),
-      contact_phone: dash(null),
+      company_name: d(),
+      street_address: d(),
+      city_state_zip: d(),
+      phone: d(),
+      fax: d(),
+      website: d(),
     },
     customer: {
-      name: dash(null),
-      address: dash(null),
-      contact_name: dash(null),
-      contact_phone: dash(null),
+      name: d(),
+      company_name: d(),
+      street_address: d(),
+      city_state_zip: d(),
+      phone: d(),
     },
     shipping: {
-      freight_type: dash(null),
-      est_ship_date: dash(null),
-      est_gross_weight: dash(null),
-      est_net_weight: dash(null),
-      package_count: dash(null),
-      country_of_origin: dash(null),
-      port_of_embarkation: dash(null),
-      port_of_destination: dash(null),
-      delivery_terms: dash(null),
-      payment_terms: dash(null),
+      freight_type: d(),
+      est_ship_date: d(),
+      est_gross_weight: d(),
+      est_cubic_weight: d(),
+      total_packages: d(),
     },
     line_items: [
       {
-        description: dash(null),
-        quantity: dash(null),
-        unit: dash(null),
-        unit_price: dash(null),
-        amount: dash(null),
+        part_number: d(),
+        unit_of_measure: d(),
+        description: d(),
+        qty: d(),
+        unit_price: d(),
+        tax: d(),
+        total_amount: d(),
       },
     ],
     totals: {
-      subtotal: dash(null),
-      tax_rate: dash(null),
-      tax: dash(null),
-      total: dash(null),
-      currency: dash(null),
+      subtotal: d(),
+      taxable: d(),
+      tax_rate: d(),
+      tax: d(),
+      freight: d(),
+      insurance: d(),
+      legal_consular: d(),
+      other1: d(),
+      other2: d(),
+      total: d(),
+      currency: d(),
     },
-    additional_details: dash(null),
-    signature: {
-      typed_name: dash(null),
-      date: dash(null),
+    terms_of_sale: { delivery_terms: d(), payment_terms: d(), comments: d() },
+    additional: {
+      country_of_origin: d(),
+      port_of_embarkation: d(),
+      port_of_discharge: d(),
+      reason_for_export: d(),
     },
+    signature: { typed_name: d(), company_name: d(), date: d() },
   };
 }
 
 function filled(): PIData {
   return {
     metadata: {
-      invoice_no: "PI-2026-001",
-      invoice_date: "2026-05-28",
+      date: "2026-05-28",
       expiration_date: "2026-06-28",
+      invoice_no: "PI-2026-001",
       customer_id: "C-001",
     },
     seller: {
-      name: "Horizon AI Trading",
-      address: "Taipei, Taiwan",
-      contact_name: "Jacky Chen",
-      contact_phone: "+886-2-0000-0000",
+      company_name: "Horizon AI Trading",
+      street_address: "Taipei, Taiwan",
+      city_state_zip: "Taipei 100",
+      phone: "+886-2-0000-0000",
+      fax: "+886-2-0000-0001",
+      website: "horizon-ai.ai",
     },
     customer: {
-      name: "Tokyo Trading Co., Ltd.",
-      address: "東京都千代田区丸の内 2-7-2",
-      contact_name: "Yamada Taro",
-      contact_phone: "+81-3-1234-5678",
+      name: "Yamada Taro",
+      company_name: "Tokyo Trading Co., Ltd.",
+      street_address: "東京都千代田区丸の内 2-7-2",
+      city_state_zip: "Tokyo 100-7014",
+      phone: "+81-3-1234-5678",
     },
     shipping: {
       freight_type: "Air",
       est_ship_date: "2026-06-15",
       est_gross_weight: "120 kg",
-      est_net_weight: "100 kg",
-      package_count: "10",
-      country_of_origin: "TW",
-      port_of_embarkation: "Taoyuan TPE",
-      port_of_destination: "Port of Tokyo",
-      delivery_terms: "FOB",
-      payment_terms: "T/T 30%/70%",
+      est_cubic_weight: "1.2 m3",
+      total_packages: "10",
     },
     line_items: [
       {
+        part_number: "MGO-001",
+        unit_of_measure: "kg",
         description: "台灣愛文芒果 (Mango Premium)",
-        quantity: "1000",
-        unit: "kg",
+        qty: "1000",
         unit_price: "15",
-        amount: "15000",
+        tax: "X",
+        total_amount: "15000",
       },
     ],
     totals: {
       subtotal: "15000",
-      tax_rate: "0",
+      taxable: "15000",
+      tax_rate: "0%",
       tax: "0",
-      total: "15000",
+      freight: "500",
+      insurance: "100",
+      legal_consular: "50",
+      other1: "0",
+      other2: "0",
+      total: "15650",
       currency: "USD",
     },
-    additional_details:
-      "日本和牛 A5 (reference order). Lead time 7 days after L/C confirmation.",
+    terms_of_sale: {
+      delivery_terms: "FOB",
+      payment_terms: "L/C at sight",
+      comments: "日本和牛 A5 reference order. Lead time 7 days after L/C confirmation.",
+    },
+    additional: {
+      country_of_origin: "TW",
+      port_of_embarkation: "Taoyuan TPE",
+      port_of_discharge: "Port of Tokyo",
+      reason_for_export: "Sale",
+    },
     signature: {
       typed_name: "Jacky Chen",
+      company_name: "Horizon AI Trading",
       date: "2026-05-28",
     },
   };
@@ -119,9 +140,9 @@ function filled(): PIData {
 
 function asciiFilled(): PIData {
   const f = filled();
-  f.customer.address = "2-7-2 Marunouchi, Chiyoda-ku, Tokyo";
+  f.customer.street_address = "2-7-2 Marunouchi, Chiyoda-ku, Tokyo";
   f.line_items[0].description = "Mango Premium (Aiwen)";
-  f.additional_details =
+  f.terms_of_sale.comments =
     "Wagyu A5 reference order. Lead time 7 days after L/C confirmation.";
   return f;
 }
@@ -138,7 +159,7 @@ describe("renderProFormaInvoice()", () => {
   it("embeds a font reference for the Noto Sans CJK family in the buffer", async () => {
     const data = filled();
     data.line_items[0].description = "台灣愛文芒果";
-    data.additional_details = "日本和牛 A5 reference order.";
+    data.terms_of_sale.comments = "日本和牛 A5 reference order.";
     const buf = await renderProFormaInvoice(data);
     // react-pdf embeds the font's PostScript name (NotoSansCJKtc-Regular), not
     // the registered family display name, so the buffer carries the spaceless
