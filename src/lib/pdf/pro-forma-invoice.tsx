@@ -19,16 +19,16 @@ const styles = StyleSheet.create({
   page: { fontFamily: FONT_FAMILY, fontSize: 8, padding: 22, color: "#111" },
 
   // top region
-  topRow: { flexDirection: "row", marginBottom: 4 },
+  topRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
   topLeft: { width: "55%", paddingRight: 10 },
-  topRight: { width: "45%" },
+  topRight: { width: "36%" },
 
   companyName: { fontSize: 13, fontWeight: 700, color: MUTED, marginBottom: 3 },
   sellerLine: { marginBottom: 1.5 },
   inlineLabel: { fontWeight: 700 },
 
   title: {
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: 700,
     color: TITLE_COLOR,
     textAlign: "right",
@@ -53,9 +53,9 @@ const styles = StyleSheet.create({
   },
 
   // mid region (customer | shipping)
-  midRow: { flexDirection: "row", marginBottom: 6 },
-  midLeft: { width: "55%", paddingRight: 10 },
-  midRight: { width: "45%" },
+  midRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  midLeft: { width: "30%" },
+  midRight: { width: "36%" },
 
   bar: { backgroundColor: BAR, paddingVertical: 2.5, paddingHorizontal: 4 },
   barGrey: { backgroundColor: GREY_BAR, paddingVertical: 2.5, paddingHorizontal: 4 },
@@ -281,7 +281,7 @@ export function ProFormaInvoice({ data }: { data: PIData }) {
           </View>
           <View style={styles.redLine} />
           {data.line_items.map((item, idx) => (
-            <View key={idx} style={[styles.row, { borderTopWidth: idx === 0 ? 0 : 1, borderTopColor: LINE }]}>
+            <View key={idx} style={styles.row}>
               <Text style={[styles.cell, styles.cPart]}>{item.part_number}</Text>
               <Text style={[styles.cell, styles.cUom]}>{item.unit_of_measure}</Text>
               <Text style={[styles.cell, styles.cDesc]}>{item.description}</Text>
@@ -292,7 +292,7 @@ export function ProFormaInvoice({ data }: { data: PIData }) {
             </View>
           ))}
           {Array.from({ length: fillerCount }).map((_, idx) => (
-            <View key={`f${idx}`} style={[styles.row, { borderTopWidth: 1, borderTopColor: LINE }]}>
+            <View key={`f${idx}`} style={styles.row}>
               <Text style={[styles.cell, styles.cPart]}> </Text>
               <Text style={[styles.cell, styles.cUom]}> </Text>
               <Text style={[styles.cell, styles.cDesc]}> </Text>
