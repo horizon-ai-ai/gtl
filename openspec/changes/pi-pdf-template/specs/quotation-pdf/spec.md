@@ -36,7 +36,7 @@ The system SHALL render Traditional Chinese, Simplified Chinese, Japanese, and K
 
 ### Requirement: Pro Forma Invoice layout sections
 
-The system SHALL render a single A4 page (595×842 pt) containing the following sections, each enclosed in a visible box or table grid: seller header block, customer block, shipping details box, line items table, totals breakdown, additional details block, signature block. Section boxes MUST always render, even when their data sources are empty.
+The system SHALL render a single A4 page (595×842 pt) reproducing the PI 公版 layout: a seller header block and a `CUSTOMER` block (upper-left), the `PRO FORMA INVOICE` title with a metadata grid (Date, Expiration Date, Invoice #, Customer ID) and a `SHIPPING DETAILS` block (upper-right), a line items table with columns `PART NUMBER`, `UNIT OF MEASURE`, `DESCRIPTION`, `QTY`, `UNIT PRICE`, `TAX`, `TOTAL AMOUNT`, a `TERMS OF SALE AND OTHER COMMENTS` block beside a totals breakdown (Subtotal, Taxable, Tax rate, Tax, Freight, Insurance, Legal/Consular Inspection/Cert., Other ×2, TOTAL, Currency), and an `ADDITIONAL DETAILS` block (Country of Origin, Port of Embarkation, Port of Discharge, Reason for Export) with a certification statement and signature area. Section header bars use a dark-blue background with white text. Section boxes MUST always render, even when their data sources are empty.
 
 #### Scenario: Empty data still draws all sections
 
@@ -46,7 +46,7 @@ The system SHALL render a single A4 page (595×842 pt) containing the following 
 #### Scenario: Filled inquiry populates all available cells
 
 - **WHEN** an inquiry has a quoted price, quoted quantity, delivery terms, port of destination, and payment terms
-- **THEN** the line items row MUST display the product description, quoted quantity, and quoted price, and the shipping details box MUST display the delivery terms, destination port, and payment terms
+- **THEN** the line items row MUST display the product description, quoted quantity, and quoted price; the Terms of Sale block MUST display the delivery terms and payment terms; and the Additional Details block MUST display the port of destination as Port of Discharge
 
 ### Requirement: Adapter purity
 
@@ -80,8 +80,9 @@ The system SHALL render em-dash (`—`, U+2014) in any PI cell whose data source
 | Freight Type            | future Shipping cols  | —          |
 | Est Gross Weight        | future Shipping cols  | —          |
 | Tax rate                | future Totals cols    | —          |
-| Country of Origin       | future Inquiry cols   | —          |
+| Part Number             | future Quote schema   | —          |
 | Port of Embarkation     | future Inquiry cols   | —          |
+| Reason for Export       | future Inquiry cols   | —          |
 | Signature typed name    | future Quote schema   | —          |
 
 ### Requirement: Preserve route side-effects
