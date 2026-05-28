@@ -1,7 +1,8 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail, handleError } from "@/lib/api";
-import { createSimplePdf } from "@/lib/pdf";
+import { inquiryToPIData } from "@/lib/pdf/inquiry-to-pi-data";
+import { renderProFormaInvoice } from "@/lib/pdf/render";
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   try {
@@ -21,22 +22,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
     });
     if (!inquiry) return fail("RESOURCE_NOT_FOUND", "Inquiry not found");
 
-    const pdf = createSimplePdf(`Quotation ${inquiry.id.slice(0, 8)}`, [
-      `Product: ${inquiry.product.name}`,
-      `Buyer: ${inquiry.buyer.company?.name ?? inquiry.buyer.display_name ?? inquiry.buyer.email}`,
-      `Seller: ${inquiry.seller.company?.name ?? inquiry.seller.display_name ?? inquiry.seller.email}`,
-      `Inquiry quantity: ${inquiry.quantity}`,
-      `Quoted quantity: ${inquiry.quoted_quantity ?? inquiry.quantity}`,
-      `Target price: ${inquiry.target_price ?? "-"}`,
-      `Quoted price: ${inquiry.quoted_price ?? "-"}`,
-      `Delivery terms: ${inquiry.delivery_terms ?? "-"}`,
-      `Destination: ${inquiry.port_of_destination ?? "-"}`,
-      `Payment terms: ${inquiry.payment_terms ?? "-"}`,
-      `Quotation version: ${inquiry.quotation_version}`,
-      `Quotation notes: ${inquiry.quotation_notes ?? "-"}`,
-      `Notes: ${inquiry.notes ?? "-"}`,
-      `Generated at: ${new Date().toLocaleString("zh-TW")}`,
-    ]);
+    const pdf = await renderProFormaInvoice(inquiryToPIData(inquiry));
 
     await prisma.inquiry.update({
       where: { id: inquiry.id },
@@ -46,7 +32,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
       },
     });
 
-    return new Response(pdf, {
+    return new Response(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="quotation-${inquiry.id.slice(0, 8)}.pdf"`,
