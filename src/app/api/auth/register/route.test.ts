@@ -91,7 +91,7 @@ jest.mock("@/lib/gcis", () => ({
 }));
 
 type EmailPayload = { to: string; subject: string; text: string; html?: string };
-const sendEmailMock = jest.fn(async (_payload: EmailPayload) => ({ skipped: true } as unknown));
+const sendEmailMock = jest.fn(async () => ({ skipped: true } as unknown));
 jest.mock("@/lib/notify", () => ({
   sendEmail: (payload: EmailPayload) => sendEmailMock(payload),
 }));
