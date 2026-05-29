@@ -19,6 +19,12 @@ function isLocalHost(host: string) {
   );
 }
 
+// Platform hosts serve the app itself (front page, login, dashboard) rather
+// than being treated as tenant custom domains.
+function isPlatformHost(host: string) {
+  return isLocalHost(host) || host.split(":")[0] === "gtl-xi.vercel.app";
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   const { pathname } = req.nextUrl;
@@ -46,7 +52,7 @@ export function middleware(req: NextRequest) {
     }
   }
 
-  if (!isLocalHost(host) && !host.endsWith(":3001")) {
+  if (!isPlatformHost(host) && !host.endsWith(":3001")) {
     if (!isStaticAsset(pathname) && !pathname.startsWith("/api")) {
       if (pathname === "/") {
         const url = req.nextUrl.clone();
