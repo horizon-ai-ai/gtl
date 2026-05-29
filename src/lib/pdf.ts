@@ -1,3 +1,7 @@
+// @deprecated createSimplePdf is unreferenced as of the pi-pdf-template change
+// (the quotation.pdf route now renders via @/lib/pdf/render). Left as dead code
+// here; scheduled for deletion in a follow-up change.
+
 function escapePdfText(text: string) {
   return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
