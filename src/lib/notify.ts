@@ -17,13 +17,18 @@ export async function sendEmail(payload: EmailPayload) {
   }
 
   try {
-    return await resend.emails.send({
+    const result = await resend.emails.send({
       from,
       to: payload.to,
       subject: payload.subject,
       text: payload.text,
       html: payload.html,
     });
+    if (result.error) {
+      console.error("[email:error]", payload.subject, payload.to, result.error);
+      return { skipped: true, error: result.error };
+    }
+    return result;
   } catch (error) {
     console.error("[email:error]", payload.subject, payload.to, error);
     return { skipped: true, error: "send_failed" };

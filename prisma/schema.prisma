@@ -33,10 +33,12 @@ model User {
   updated_at        DateTime   @updatedAt
   deleted_at        DateTime?
 
-  company        CompanyProfile?
-  oauth_accounts OAuthAccount[]
-  sessions       Session[]
-  subscription   Subscription?
+  company                  CompanyProfile?
+  oauth_accounts           OAuthAccount[]
+  sessions                 Session[]
+  password_reset_tokens    PasswordResetToken[]
+  email_verification_tokens EmailVerificationToken[]
+  subscription             Subscription?
   invoices       Invoice[]
   token_packs    TokenPack[]
   usages         UserUsage[]
@@ -114,9 +116,35 @@ model Session {
   user_agent         String?
   expires_at         DateTime
   revoked_at         DateTime?
+  last_seen_at       DateTime?
   created_at         DateTime  @default(now())
 
   @@index([user_id, revoked_at])
+  @@index([user_id, revoked_at, expires_at])
+}
+
+model PasswordResetToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  user_id     String    @db.Uuid
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  token_hash  String    @unique
+  expires_at  DateTime
+  consumed_at DateTime?
+  created_at  DateTime  @default(now())
+
+  @@index([user_id, consumed_at])
+}
+
+model EmailVerificationToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  user_id     String    @db.Uuid
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  token_hash  String    @unique
+  expires_at  DateTime
+  consumed_at DateTime?
+  created_at  DateTime  @default(now())
+
+  @@index([user_id, consumed_at])
 }
 
 // =====================
