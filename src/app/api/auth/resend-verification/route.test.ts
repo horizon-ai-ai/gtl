@@ -128,7 +128,6 @@ describe("POST /api/auth/resend-verification", () => {
     authMock.mockResolvedValue({ user: { id: "u_bob", email: "bob@example.com" } });
 
     const res = await POST(makeReq({}));
-    const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(verifyTokens).toHaveLength(1);
