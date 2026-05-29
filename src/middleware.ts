@@ -21,8 +21,13 @@ function isLocalHost(host: string) {
 
 // Platform hosts serve the app itself (front page, login, dashboard) rather
 // than being treated as tenant custom domains.
+const PLATFORM_HOSTS = new Set([
+  "gtl-xi.vercel.app",
+  "gtl-git-develop-horizon-ais-projects-cef69eab.vercel.app",
+]);
+
 function isPlatformHost(host: string) {
-  return isLocalHost(host) || host.split(":")[0] === "gtl-xi.vercel.app";
+  return isLocalHost(host) || PLATFORM_HOSTS.has(host.split(":")[0]);
 }
 
 export function middleware(req: NextRequest) {
