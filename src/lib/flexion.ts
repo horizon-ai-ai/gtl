@@ -23,6 +23,7 @@ export type FlexionRequest = {
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  response_format?: Record<string, unknown>;
 };
 
 export type FlexionUsage = {
@@ -38,6 +39,12 @@ const MODEL_MULTIPLIER: Record<string, number> = {
   "kimi-k2.5": 5,
   "kimi-k2.6": 5,
   "kimi-k2-thinking": 10,
+  "openai/gpt-4o-mini": 2,
+  "openai/gpt-4.1-mini": 2,
+  "anthropic/claude-3.5-haiku": 2,
+  "anthropic/claude-sonnet-4.5": 5,
+  "google/gemini-2.5-flash": 2,
+  "google/gemini-2.5-pro": 5,
 };
 
 export function rawToCredits(model: string, usage: FlexionUsage): bigint {
@@ -52,7 +59,13 @@ export function pickModel(opts: {
   if (MODEL_OVERRIDE) return MODEL_OVERRIDE;
 
   const isMoonshot = BASE_URL.includes("api.moonshot.ai") || BASE_URL.includes("api.moonshot.cn");
+  const isOpenRouter = BASE_URL.includes("openrouter.ai");
   const { plan, taskHint = "normal" } = opts;
+  if (isOpenRouter) {
+    if (taskHint === "complex") return process.env.OPENROUTER_COMPLEX_MODEL?.trim() || "anthropic/claude-sonnet-4.5";
+    if (taskHint === "fast") return process.env.OPENROUTER_FAST_MODEL?.trim() || "openai/gpt-4o-mini";
+    return process.env.CONVERSATION_AI_MODEL?.trim() || "openai/gpt-4o-mini";
+  }
   if (isMoonshot) {
     if (plan === "free" || plan === "starter") {
       return taskHint === "fast" ? "kimi-k2-turbo-preview" : "kimi-k2.5";
@@ -69,9 +82,13 @@ export function pickModel(opts: {
   return "claude-sonnet-4-6";
 }
 
-const BASE_URL = process.env.FLEXION_API_BASE_URL ?? "";
-const API_KEY = process.env.FLEXION_API_KEY ?? "";
+const BASE_URL =
+  process.env.FLEXION_API_BASE_URL ||
+  (process.env.OPENROUTER_API_KEY ? "https://openrouter.ai/api/v1" : "");
+const API_KEY = process.env.FLEXION_API_KEY || process.env.OPENROUTER_API_KEY || "";
 const MODEL_OVERRIDE = process.env.FLEXION_MODEL?.trim() ?? "";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+const PROVIDER_TITLE = process.env.FLEXION_APP_TITLE || "Marketing AI Platform";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? "";
 const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_API_BASE_URL ?? "https://api.anthropic.com/v1";
 const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION ?? "2023-06-01";
@@ -79,6 +96,27 @@ const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION ?? "2023-06-01";
 type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "done"; usage: FlexionUsage; model: string };
+
+function providerHeaders() {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${API_KEY}`,
+    "X-Tenant-Id": "marketing-ai-platform",
+  };
+
+  if (BASE_URL.includes("openrouter.ai")) {
+    headers["HTTP-Referer"] = APP_URL;
+    headers["X-Title"] = PROVIDER_TITLE;
+  }
+
+  return headers;
+}
+
+function missingProviderError() {
+  return new Error(
+    "LLM provider is not configured. Set FLEXION_API_BASE_URL and FLEXION_API_KEY, or set ANTHROPIC_API_KEY.",
+  );
+}
 
 function extractAnthropicSystem(messages: FlexionMessage[]) {
   return messages
@@ -179,28 +217,11 @@ export async function* flexionStream(req: FlexionRequest) {
     return;
   }
 
-  if (!API_KEY) {
-    // Development fallback: emit a fake stream so the UI is testable without keys
-    const text = "（開發模式）Flexion API key 尚未設定，這是模擬回應。";
-    for (const ch of text) {
-      yield { type: "token" as const, delta: ch };
-      await new Promise((r) => setTimeout(r, 15));
-    }
-    yield {
-      type: "done" as const,
-      usage: { input_tokens: 10, output_tokens: text.length },
-      model: req.model,
-    };
-    return;
-  }
+  if (!BASE_URL || !API_KEY) throw missingProviderError();
 
   const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
-      "X-Tenant-Id": "marketing-ai-platform",
-    },
+    headers: providerHeaders(),
     body: JSON.stringify({
       ...req,
       stream: true,
@@ -246,4 +267,95 @@ export async function* flexionStream(req: FlexionRequest) {
       }
     }
   }
+}
+
+export type FlexionCompleteResult = {
+  text: string;
+  usage: FlexionUsage;
+  model: string;
+};
+
+type AnthropicTextBlock = {
+  type: string;
+  text?: string;
+};
+
+async function anthropicComplete(req: FlexionRequest): Promise<FlexionCompleteResult> {
+  const system = extractAnthropicSystem(req.messages);
+  const messages = toAnthropicMessages(req.messages);
+  const res = await fetch(`${ANTHROPIC_BASE_URL}/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": ANTHROPIC_VERSION,
+    },
+    body: JSON.stringify({
+      model: req.model,
+      system: system || undefined,
+      messages,
+      max_tokens: req.max_tokens ?? 1024,
+      temperature: req.temperature,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Anthropic error: ${res.status} ${await res.text()}`);
+  }
+
+  const json = await res.json();
+  const text = (json.content ?? [])
+    .filter((block: AnthropicTextBlock) => block.type === "text")
+    .map((block: AnthropicTextBlock) => block.text ?? "")
+    .join("");
+
+  return {
+    text,
+    usage: {
+      input_tokens: json.usage?.input_tokens ?? 0,
+      output_tokens: json.usage?.output_tokens ?? 0,
+    },
+    model: json.model ?? req.model,
+  };
+}
+
+export async function flexionComplete(
+  req: FlexionRequest,
+): Promise<FlexionCompleteResult> {
+  if (ANTHROPIC_API_KEY) return anthropicComplete(req);
+
+  if (!BASE_URL || !API_KEY) throw missingProviderError();
+
+  const res = await fetch(`${BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: providerHeaders(),
+    body: JSON.stringify({ ...req, stream: false }),
+  });
+
+  if (!res.ok) throw new Error(`Flexion error: ${res.status} ${await res.text()}`);
+
+  const json = await res.json();
+  return {
+    text: json.choices?.[0]?.message?.content ?? "",
+    usage: {
+      input_tokens: json.usage?.input_tokens ?? json.usage?.prompt_tokens ?? 0,
+      output_tokens: json.usage?.output_tokens ?? json.usage?.completion_tokens ?? 0,
+    },
+    model: json.model ?? req.model,
+  };
+}
+
+export async function flexionCompleteJSON<T = unknown>(
+  req: FlexionRequest,
+): Promise<{ data: T; usage: FlexionUsage; model: string }> {
+  const result = await flexionComplete({
+    ...req,
+    ...({ response_format: { type: "json_object" } } as Partial<FlexionRequest>),
+  });
+  const cleaned = result.text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```\s*$/i, "");
+  return { data: JSON.parse(cleaned) as T, usage: result.usage, model: result.model };
 }

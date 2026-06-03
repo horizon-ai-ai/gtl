@@ -14,7 +14,9 @@ const variantSchema = z.object({
 
 const updateProductSchema = z.object({
   name: z.string().min(2).max(120).optional(),
+  description: z.string().max(2000).optional().nullable(),
   category: z.string().min(1).max(100).optional(),
+  hs_code: z.string().max(20).optional().nullable(),
   specs: z
     .object({
       unit_length_cm: z.string().max(50).optional(),
@@ -28,6 +30,16 @@ const updateProductSchema = z.object({
       english_name: z.string().max(120).optional(),
       barcode: z.string().max(120).optional(),
       product_spec_text: z.string().max(200).optional(),
+      quantity_range: z.string().max(120).optional(),
+      total_price: z.string().max(120).optional(),
+      remarks: z.string().max(4000).optional(),
+      seller_info: z.string().max(1000).optional(),
+      shelf_life: z.string().max(200).optional(),
+      allergens: z.string().max(2000).optional(),
+      nutrition_label: z.string().max(4000).optional(),
+      permit_no: z.string().max(500).optional(),
+      return_policy: z.string().max(2000).optional(),
+      warranty_policy: z.string().max(2000).optional(),
       tax_category: z.string().max(100).optional(),
       original_price: z.string().max(50).optional(),
       promo_price: z.string().max(50).optional(),

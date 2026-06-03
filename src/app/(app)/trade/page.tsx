@@ -134,13 +134,25 @@ const EMPTY_PROFILE = {
 
 const EMPTY_PRODUCT = {
   name: "",
+  description: "",
   category: "",
+  hs_code: "",
   price_fob_usd: "",
   origin_country: "",
   brand: "",
   english_name: "",
   barcode: "",
   product_spec_text: "",
+  quantity_range: "",
+  total_price: "",
+  remarks: "",
+  seller_info: "",
+  shelf_life: "",
+  allergens: "",
+  nutrition_label: "",
+  permit_no: "",
+  return_policy: "",
+  warranty_policy: "",
   tax_category: "",
   original_price: "",
   promo_price: "",
@@ -190,13 +202,18 @@ const EMPTY_INQUIRY = {
   notes: "",
 };
 
+const FALLBACK_TRADE_CATALOG: TradeCatalog = {
+  categories: ["食品", "美妝", "雜貨", "電器", "其他"],
+  hs_codes: [],
+};
+
 export default function TradePage() {
   const [tab, setTab] = useState("market");
   const [productSubTab, setProductSubTab] = useState<"list" | "form">("list");
   const [inquirySubTab, setInquirySubTab] = useState<"sent" | "received">("sent");
   const [access, setAccess] = useState<TradeAccess | null>(null);
   const [profile, setProfile] = useState<TradeProfile>(null);
-  const [catalog, setCatalog] = useState<TradeCatalog>({ categories: [], hs_codes: [] });
+  const [catalog, setCatalog] = useState<TradeCatalog>(FALLBACK_TRADE_CATALOG);
   const [profileForm, setProfileForm] = useState(EMPTY_PROFILE);
   const [myProducts, setMyProducts] = useState<Product[]>([]);
   const [marketProducts, setMarketProducts] = useState<Product[]>([]);
@@ -287,9 +304,18 @@ export default function TradePage() {
   }
 
   async function loadCatalog() {
-    const res = await fetch("/api/trade/categories");
+    const res = await fetch("/api/trade/categories", { cache: "no-store" });
     const json = await res.json();
-    setCatalog(json.data ?? { categories: [], hs_codes: [] });
+    if (!res.ok) {
+      setCatalog(FALLBACK_TRADE_CATALOG);
+      setStatus(json.error?.message ?? "商品分類載入失敗，暫時使用預設分類");
+      return;
+    }
+    const nextCatalog = (json.data ?? FALLBACK_TRADE_CATALOG) as TradeCatalog;
+    setCatalog({
+      categories: nextCatalog.categories.length ? nextCatalog.categories : FALLBACK_TRADE_CATALOG.categories,
+      hs_codes: nextCatalog.hs_codes ?? [],
+    });
   }
 
   async function loadProducts(sellerAllowed = access?.seller_allowed ?? false) {
@@ -353,13 +379,25 @@ export default function TradePage() {
 
     const payload = {
       name: productForm.name,
+      description: productForm.description || undefined,
       category: productForm.category,
+      hs_code: productForm.hs_code || undefined,
       images: draftImages,
       specs: {
         brand: productForm.brand || undefined,
         english_name: productForm.english_name || undefined,
         barcode: productForm.barcode || undefined,
         product_spec_text: productForm.product_spec_text || undefined,
+        quantity_range: productForm.quantity_range || undefined,
+        total_price: productForm.total_price || undefined,
+        remarks: productForm.remarks || undefined,
+        seller_info: productForm.seller_info || undefined,
+        shelf_life: productForm.shelf_life || undefined,
+        allergens: productForm.allergens || undefined,
+        nutrition_label: productForm.nutrition_label || undefined,
+        permit_no: productForm.permit_no || undefined,
+        return_policy: productForm.return_policy || undefined,
+        warranty_policy: productForm.warranty_policy || undefined,
         tax_category: productForm.tax_category || undefined,
         original_price: productForm.original_price || undefined,
         promo_price: productForm.promo_price || undefined,
@@ -444,13 +482,25 @@ export default function TradePage() {
     setEditingProductId(product.id);
     setProductForm({
       name: product.name,
+      description: product.description ?? "",
       category: product.category ?? "",
+      hs_code: product.hs_code ?? readSpec(product.specs, "hs_code"),
       price_fob_usd: product.price_min == null ? "" : String(product.price_min),
       origin_country: product.origin_country ?? "",
       brand: readSpec(product.specs, "brand"),
       english_name: readSpec(product.specs, "english_name"),
       barcode: readSpec(product.specs, "barcode"),
       product_spec_text: readSpec(product.specs, "product_spec_text"),
+      quantity_range: readSpec(product.specs, "quantity_range"),
+      total_price: readSpec(product.specs, "total_price"),
+      remarks: readSpec(product.specs, "remarks"),
+      seller_info: readSpec(product.specs, "seller_info"),
+      shelf_life: readSpec(product.specs, "shelf_life"),
+      allergens: readSpec(product.specs, "allergens"),
+      nutrition_label: readSpec(product.specs, "nutrition_label"),
+      permit_no: readSpec(product.specs, "permit_no"),
+      return_policy: readSpec(product.specs, "return_policy"),
+      warranty_policy: readSpec(product.specs, "warranty_policy"),
       tax_category: readSpec(product.specs, "tax_category"),
       original_price: readSpec(product.specs, "original_price"),
       promo_price: readSpec(product.specs, "promo_price"),
@@ -746,7 +796,8 @@ export default function TradePage() {
   }, [canSell, inquirySubTab, tab]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 lg:px-8">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 lg:px-8">
       <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-[radial-gradient(circle_at_top_left,_rgba(241,244,255,0.95),_rgba(255,255,255,1)_42%),linear-gradient(135deg,_#ffffff,_#f6f8fb)] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
         <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.4fr_0.9fr] lg:px-8 lg:py-8">
           <div className="space-y-5">
@@ -899,7 +950,7 @@ export default function TradePage() {
 
         <TabsContent value="market">
           <div className="space-y-6">
-            <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+            <Card className="overflow-visible rounded-[24px] border-neutral-200 shadow-sm">
               <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
                 <div className="flex items-start gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
@@ -921,18 +972,13 @@ export default function TradePage() {
                     />
                   </Field>
                   <Field label="類別">
-                    <select
+                    <SearchablePicker
                       value={filters.category}
-                      onChange={(e) => setFilters((v) => ({ ...v, category: e.target.value }))}
-                      className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
-                    >
-                      <option value="">全部類別</option>
-                      {catalog.categories.map((category) => (
-                        <option key={category} value={category}>
-                          {category}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(category) => setFilters((v) => ({ ...v, category }))}
+                      options={catalog.categories}
+                      placeholder="搜尋或輸入類別"
+                      emptyLabel="全部類別"
+                    />
                   </Field>
                   <Field label="HS code">
                     <Input
@@ -1165,7 +1211,7 @@ export default function TradePage() {
             </div>
 
             {productSubTab === "list" ? (
-            <Card className="overflow-hidden rounded-[24px] border-neutral-200 shadow-sm">
+            <Card className="overflow-visible rounded-[24px] border-neutral-200 shadow-sm">
               <CardHeader className="border-b border-neutral-100 bg-neutral-50/70">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3">
@@ -1284,190 +1330,239 @@ export default function TradePage() {
                     請先升級方案並完成賣家身份審核，才能新增商品。
                   </div>
                 ) : (
-                  <form onSubmit={createProduct} className="space-y-4">
-                    <Field label="類型">
-                      <select
-                        value={productForm.category}
-                        onChange={(e) => setProductForm((v) => ({ ...v, category: e.target.value }))}
-                        className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
-                        required
-                      >
-                        <option value="">請選擇類型</option>
-                        {catalog.categories.map((category) => (
-                          <option key={category} value={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="中文品名">
-                        <Input
-                          value={productForm.name}
-                          onChange={(e) => setProductForm((v) => ({ ...v, name: e.target.value }))}
-                          required
-                        />
-                      </Field>
-                      <Field label="英文品名">
-                        <Input
-                          value={productForm.english_name}
-                          onChange={(e) => setProductForm((v) => ({ ...v, english_name: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="品牌">
-                        <Input
-                          value={productForm.brand}
-                          onChange={(e) => setProductForm((v) => ({ ...v, brand: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="條碼">
-                        <Input
-                          value={productForm.barcode}
-                          onChange={(e) => setProductForm((v) => ({ ...v, barcode: e.target.value }))}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="關聯商品頁">
-                        <select
-                          value={productForm.linked_site_id}
-                          onChange={(e) => {
-                            const siteId = e.target.value;
-                            const site = sellerSites.find((item) => item.id === siteId);
-                            setProductForm((v) => ({
-                              ...v,
-                              linked_site_id: siteId,
-                              linked_site_url: site ? `/s/${site.slug}` : "",
-                            }));
-                          }}
-                          className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
-                        >
-                          <option value="">未關聯商品頁</option>
-                          {sellerSites.map((site) => (
-                            <option key={site.id} value={site.id}>
-                              {site.name} · /s/{site.slug}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="商品頁網址">
-                        <div className="space-y-2">
+                  <form onSubmit={createProduct} className="space-y-6">
+                    <FormSection
+                      eyebrow="01"
+                      title="商品基本資料"
+                      description="這些資料會同步供網站生成、報價單與商品列表使用。"
+                    >
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="商品名稱（必填）">
                           <Input
-                            value={productForm.linked_site_url}
-                            onChange={(e) => setProductForm((v) => ({ ...v, linked_site_url: e.target.value }))}
-                            placeholder="/s/your-site-slug"
+                            value={productForm.name}
+                            onChange={(e) => setProductForm((v) => ({ ...v, name: e.target.value }))}
+                            required
+                            placeholder="例如：MoreuAI 智能商品包"
                           />
-                          <div className="flex flex-wrap gap-2">
-                            <Link href="/trade/sites" className="text-xs font-medium text-neutral-600 underline underline-offset-4">
-                              前往商品頁建置
-                            </Link>
-                            {productForm.linked_site_url ? (
-                              <Link
-                                href={productForm.linked_site_url}
-                                target="_blank"
-                                className="text-xs font-medium text-neutral-600 underline underline-offset-4"
-                              >
-                                預覽已關聯頁面
+                        </Field>
+                        <Field label="分類（必填）">
+                          <SearchablePicker
+                            value={productForm.category}
+                            onChange={(category) => setProductForm((v) => ({ ...v, category }))}
+                            options={catalog.categories}
+                            placeholder="搜尋或輸入商品分類"
+                            emptyLabel="請選擇分類"
+                            required
+                          />
+                        </Field>
+                        <Field label="品牌">
+                          <Input
+                            value={productForm.brand}
+                            onChange={(e) => setProductForm((v) => ({ ...v, brand: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="英文品名">
+                          <Input
+                            value={productForm.english_name}
+                            onChange={(e) => setProductForm((v) => ({ ...v, english_name: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="國際條碼">
+                          <Input
+                            value={productForm.barcode}
+                            onChange={(e) => setProductForm((v) => ({ ...v, barcode: e.target.value }))}
+                            placeholder="EAN / UPC / GTIN"
+                          />
+                        </Field>
+                        <Field label="HS code">
+                          <Input
+                            value={productForm.hs_code}
+                            onChange={(e) => setProductForm((v) => ({ ...v, hs_code: e.target.value }))}
+                            placeholder="例如 1905.90"
+                          />
+                        </Field>
+                      </div>
+                      <Field label="商品簡述介紹">
+                        <TradeTextarea
+                          value={productForm.description}
+                          onChange={(value) => setProductForm((v) => ({ ...v, description: value }))}
+                          placeholder="給 AI 與內部理解商品用，不一定顯示在報價單。"
+                        />
+                      </Field>
+                    </FormSection>
+
+                    <FormSection
+                      eyebrow="02"
+                      title="規格、數量與報價"
+                      description="這一段會直接影響商品頁文案與貿易報價資料。"
+                    >
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="商品規格（必填）">
+                          <Input
+                            value={productForm.product_spec_text}
+                            onChange={(e) => setProductForm((v) => ({ ...v, product_spec_text: e.target.value }))}
+                            placeholder="例如：14片 x 3包 x 1件"
+                            required
+                          />
+                        </Field>
+                        <Field label="數量範圍（必填）">
+                          <Input
+                            value={productForm.quantity_range}
+                            onChange={(e) => setProductForm((v) => ({ ...v, quantity_range: e.target.value }))}
+                            placeholder="例如：100-500 箱 / 1,000 件以上"
+                            required
+                          />
+                        </Field>
+                        <Field label="單價 USD（必填）">
+                          <Input
+                            value={productForm.price_fob_usd}
+                            onChange={(e) => setProductForm((v) => ({ ...v, price_fob_usd: e.target.value }))}
+                            placeholder="例如：12"
+                            required
+                          />
+                        </Field>
+                        <Field label="總價（必填）">
+                          <Input
+                            value={productForm.total_price}
+                            onChange={(e) => setProductForm((v) => ({ ...v, total_price: e.target.value }))}
+                            placeholder="例如：依實際採購數量計算 / USD 1,200"
+                            required
+                          />
+                        </Field>
+                        <Field label="產地（必填）">
+                          <Input
+                            value={productForm.origin_country}
+                            onChange={(e) => setProductForm((v) => ({ ...v, origin_country: e.target.value }))}
+                            required
+                          />
+                        </Field>
+                        <Field label="箱入數">
+                          <Input
+                            value={productForm.carton_quantity}
+                            onChange={(e) => setProductForm((v) => ({ ...v, carton_quantity: e.target.value }))}
+                            placeholder="例如：24 入 / 箱"
+                          />
+                        </Field>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-4">
+                        <Field label="長（CM）">
+                          <Input
+                            value={productForm.unit_length_cm}
+                            onChange={(e) => setProductForm((v) => ({ ...v, unit_length_cm: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="寬（CM）">
+                          <Input
+                            value={productForm.unit_width_cm}
+                            onChange={(e) => setProductForm((v) => ({ ...v, unit_width_cm: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="高（CM）">
+                          <Input
+                            value={productForm.unit_height_cm}
+                            onChange={(e) => setProductForm((v) => ({ ...v, unit_height_cm: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="重量（KG）">
+                          <Input
+                            value={productForm.unit_weight_kg}
+                            onChange={(e) => setProductForm((v) => ({ ...v, unit_weight_kg: e.target.value }))}
+                          />
+                        </Field>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="箱重（淨重 KG）">
+                          <Input
+                            value={productForm.carton_net_weight_kg}
+                            onChange={(e) => setProductForm((v) => ({ ...v, carton_net_weight_kg: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="箱重（毛重 KG）">
+                          <Input
+                            value={productForm.carton_gross_weight_kg}
+                            onChange={(e) => setProductForm((v) => ({ ...v, carton_gross_weight_kg: e.target.value }))}
+                          />
+                        </Field>
+                      </div>
+                    </FormSection>
+
+                    <FormSection
+                      eyebrow="03"
+                      title="價格延伸與商品頁連動"
+                      description="可選擇既有商品頁，或只先建立商品資料給網站生成使用。"
+                    >
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="關聯商品頁">
+                          <select
+                            value={productForm.linked_site_id}
+                            onChange={(e) => {
+                              const siteId = e.target.value;
+                              const site = sellerSites.find((item) => item.id === siteId);
+                              setProductForm((v) => ({
+                                ...v,
+                                linked_site_id: siteId,
+                                linked_site_url: site ? `/s/${site.slug}` : "",
+                              }));
+                            }}
+                            className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          >
+                            <option value="">未關聯商品頁</option>
+                            {sellerSites.map((site) => (
+                              <option key={site.id} value={site.id}>
+                                {site.name} · /s/{site.slug}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="商品頁網址">
+                          <div className="space-y-2">
+                            <Input
+                              value={productForm.linked_site_url}
+                              onChange={(e) => setProductForm((v) => ({ ...v, linked_site_url: e.target.value }))}
+                              placeholder="/s/your-site-slug"
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Link href="/trade/sites" className="text-xs font-medium text-neutral-600 underline underline-offset-4">
+                                前往商品頁建置
                               </Link>
-                            ) : null}
+                              {productForm.linked_site_url ? (
+                                <Link
+                                  href={productForm.linked_site_url}
+                                  target="_blank"
+                                  className="text-xs font-medium text-neutral-600 underline underline-offset-4"
+                                >
+                                  預覽已關聯頁面
+                                </Link>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                      </Field>
-                      <Field label="價格（USD）">
-                        <Input
-                          value={productForm.price_fob_usd}
-                          onChange={(e) => setProductForm((v) => ({ ...v, price_fob_usd: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="FOB">
-                        <div className="flex h-10 items-center rounded-md border border-neutral-300 bg-neutral-50 px-3 text-sm text-neutral-600">
-                          FOB
-                        </div>
-                      </Field>
-                      <Field label="產地">
-                        <Input
-                          value={productForm.origin_country}
-                          onChange={(e) =>
-                            setProductForm((v) => ({ ...v, origin_country: e.target.value }))
-                          }
-                        />
-                      </Field>
-                      <Field label="箱入數（一箱幾入）">
-                        <Input
-                          value={productForm.carton_quantity}
-                          onChange={(e) => setProductForm((v) => ({ ...v, carton_quantity: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="商品規格文字">
-                        <Input
-                          value={productForm.product_spec_text}
-                          onChange={(e) => setProductForm((v) => ({ ...v, product_spec_text: e.target.value }))}
-                          placeholder="例如：14片 x 3包 x 1件"
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-4">
-                      <Field label="長（CM）">
-                        <Input
-                          value={productForm.unit_length_cm}
-                          onChange={(e) => setProductForm((v) => ({ ...v, unit_length_cm: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="寬（CM）">
-                        <Input
-                          value={productForm.unit_width_cm}
-                          onChange={(e) => setProductForm((v) => ({ ...v, unit_width_cm: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="高（CM）">
-                        <Input
-                          value={productForm.unit_height_cm}
-                          onChange={(e) => setProductForm((v) => ({ ...v, unit_height_cm: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="重量（KG）">
-                        <Input
-                          value={productForm.unit_weight_kg}
-                          onChange={(e) => setProductForm((v) => ({ ...v, unit_weight_kg: e.target.value }))}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="箱重（淨重 KG）">
-                        <Input
-                          value={productForm.carton_net_weight_kg}
-                          onChange={(e) => setProductForm((v) => ({ ...v, carton_net_weight_kg: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="箱重（毛重 KG）">
-                        <Input
-                          value={productForm.carton_gross_weight_kg}
-                          onChange={(e) => setProductForm((v) => ({ ...v, carton_gross_weight_kg: e.target.value }))}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <Field label="應免稅/稅別">
-                        <Input
-                          value={productForm.tax_category}
-                          onChange={(e) => setProductForm((v) => ({ ...v, tax_category: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="原價">
-                        <Input
-                          value={productForm.original_price}
-                          onChange={(e) => setProductForm((v) => ({ ...v, original_price: e.target.value }))}
-                        />
-                      </Field>
-                      <Field label="促銷價">
-                        <Input
-                          value={productForm.promo_price}
-                          onChange={(e) => setProductForm((v) => ({ ...v, promo_price: e.target.value }))}
-                        />
-                      </Field>
-                    </div>
-                    <div className="rounded-md border p-4 space-y-4">
-                      <label className="flex items-center gap-2 text-sm font-medium">
+                        </Field>
+                        <Field label="應免稅/稅別">
+                          <Input
+                            value={productForm.tax_category}
+                            onChange={(e) => setProductForm((v) => ({ ...v, tax_category: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="原價">
+                          <Input
+                            value={productForm.original_price}
+                            onChange={(e) => setProductForm((v) => ({ ...v, original_price: e.target.value }))}
+                          />
+                        </Field>
+                        <Field label="促銷價">
+                          <Input
+                            value={productForm.promo_price}
+                            onChange={(e) => setProductForm((v) => ({ ...v, promo_price: e.target.value }))}
+                          />
+                        </Field>
+                      </div>
+                    </FormSection>
+                    <FormSection
+                      eyebrow="04"
+                      title="多品相與特規"
+                      description="同一商品有不同口味、尺寸或價格時，可以用特規保留成多商品資料。"
+                    >
+                      <label className="flex items-center gap-2 text-sm font-medium text-neutral-800">
                         <input
                           type="checkbox"
                           checked={productForm.special_spec_enabled}
@@ -1549,9 +1644,20 @@ export default function TradePage() {
                           </Button>
                         </div>
                       ) : null}
-                    </div>
-                    <div className="rounded-md border p-4 space-y-4">
-                      <div className="text-sm font-medium">其他資訊</div>
+                    </FormSection>
+                    <FormSection
+                      eyebrow="05"
+                      title="備註、保存與賣家資訊"
+                      description="這一段會輔助報價單內容，也會讓 AI 生成一頁式文案時更準確。"
+                    >
+                      <Field label="備註欄（必填）">
+                        <TradeTextarea
+                          value={productForm.remarks}
+                          onChange={(value) => setProductForm((v) => ({ ...v, remarks: value }))}
+                          placeholder="例如：出貨限制、包裝注意事項、報價條件、可接受付款條件。"
+                          required
+                        />
+                      </Field>
                       <div className="grid gap-4 md:grid-cols-3">
                         <Field label="保存日期">
                           <Input
@@ -1571,9 +1677,17 @@ export default function TradePage() {
                             value={productForm.storage_method}
                             onChange={(e) => setProductForm((v) => ({ ...v, storage_method: e.target.value }))}
                             placeholder="例如：常溫 / 冷凍 / 冷藏"
+                            required
                           />
                         </Field>
                       </div>
+                      <Field label="保存期限 / 保存條件">
+                        <Input
+                          value={productForm.shelf_life}
+                          onChange={(e) => setProductForm((v) => ({ ...v, shelf_life: e.target.value }))}
+                          placeholder="例如：未開封 12 個月，開封後冷藏 7 日內食用"
+                        />
+                      </Field>
                       <Field label="是否需控溫">
                         <div className="flex gap-4 text-sm">
                           {[
@@ -1591,18 +1705,24 @@ export default function TradePage() {
                           ))}
                         </div>
                       </Field>
+                      <Field label="賣家資訊（必填）">
+                        <TradeTextarea
+                          value={productForm.seller_info}
+                          onChange={(value) => setProductForm((v) => ({ ...v, seller_info: value }))}
+                          placeholder="公司名稱、聯絡窗口、出貨地、可服務市場等。"
+                          required
+                        />
+                      </Field>
                       <Field label="商品特色說明">
-                        <textarea
+                        <TradeTextarea
                           value={productForm.feature_description}
-                          onChange={(e) => setProductForm((v) => ({ ...v, feature_description: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, feature_description: value }))}
                         />
                       </Field>
                       <Field label="商品完整說明">
-                        <textarea
+                        <TradeTextarea
                           value={productForm.full_description}
-                          onChange={(e) => setProductForm((v) => ({ ...v, full_description: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, full_description: value }))}
                         />
                       </Field>
                       <div className="grid gap-4 md:grid-cols-3">
@@ -1640,121 +1760,159 @@ export default function TradePage() {
                         </Field>
                       </div>
                       <Field label="產品成份及食品添加物">
-                        <textarea
+                        <TradeTextarea
                           value={productForm.ingredients}
-                          onChange={(e) => setProductForm((v) => ({ ...v, ingredients: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, ingredients: value }))}
+                        />
+                      </Field>
+                      <Field label="過敏原">
+                        <TradeTextarea
+                          value={productForm.allergens}
+                          onChange={(value) => setProductForm((v) => ({ ...v, allergens: value }))}
+                          placeholder="食品、蛋糕、生鮮可填寫；其他商品可留空。"
                         />
                       </Field>
                       <Field label="營養標示（文字）">
-                        <textarea
+                        <TradeTextarea
+                          value={productForm.nutrition_label}
+                          onChange={(value) => setProductForm((v) => ({ ...v, nutrition_label: value }))}
+                          placeholder="食品、蛋糕、生鮮適用。"
+                        />
+                      </Field>
+                      <Field label="商品宣稱 / 行銷重點">
+                        <TradeTextarea
                           value={productForm.marketing_claim}
-                          onChange={(e) => setProductForm((v) => ({ ...v, marketing_claim: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, marketing_claim: value }))}
                         />
                       </Field>
                       <Field label="產品責任險">
-                        <textarea
+                        <TradeTextarea
                           value={productForm.liability_insurance}
-                          onChange={(e) => setProductForm((v) => ({ ...v, liability_insurance: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, liability_insurance: value }))}
                         />
                       </Field>
                       <Field label="食品業者登錄字號">
-                        <textarea
+                        <TradeTextarea
                           value={productForm.food_registration_no}
-                          onChange={(e) => setProductForm((v) => ({ ...v, food_registration_no: e.target.value }))}
-                          className="min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          onChange={(value) => setProductForm((v) => ({ ...v, food_registration_no: value }))}
                         />
                       </Field>
-                    </div>
-                    <Field label="檢測認證">
-                      <Input
-                        value={productForm.certifications}
-                        onChange={(e) =>
-                          setProductForm((v) => ({ ...v, certifications: e.target.value }))
-                        }
-                        placeholder="例如：SGS、CE"
-                      />
-                    </Field>
-                    <Field label="商品圖片">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={(e) => setProductFiles(Array.from(e.target.files ?? []))}
-                        className="block w-full text-sm text-neutral-600 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-900 file:px-3 file:py-2 file:text-sm file:text-white"
-                      />
-                      <p className="text-xs text-neutral-500">
-                        {productFiles.length > 0
-                          ? `已選擇 ${productFiles.length} 個檔案，送出商品後會一併上傳。`
-                          : "支援多張圖片，上傳後會存入本地 public 資產路徑；部署時可用 ASSET_BASE_URL 接 CDN。"}
-                      </p>
-                    </Field>
-                    <div className="flex items-center gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => void analyzeProductImages()}
-                        disabled={analyzingImages || productFiles.length === 0}
-                      >
-                        {analyzingImages ? "辨識中..." : "AI 辨識圖片並預填"}
-                      </Button>
-                      {draftConfidence != null ? (
-                        <span className="text-sm text-neutral-500">
-                          辨識信心 {Math.round(draftConfidence * 100)}%
-                        </span>
+                      <Field label="檢驗許可證字號 / 成分許可">
+                        <TradeTextarea
+                          value={productForm.permit_no}
+                          onChange={(value) => setProductForm((v) => ({ ...v, permit_no: value }))}
+                          placeholder="美妝、保養品、藥品或法規管轄商品適用。"
+                        />
+                      </Field>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="退換貨條款（必填）">
+                          <TradeTextarea
+                            value={productForm.return_policy}
+                            onChange={(value) => setProductForm((v) => ({ ...v, return_policy: value }))}
+                            required
+                          />
+                        </Field>
+                        <Field label="售後保固條款">
+                          <TradeTextarea
+                            value={productForm.warranty_policy}
+                            onChange={(value) => setProductForm((v) => ({ ...v, warranty_policy: value }))}
+                          />
+                        </Field>
+                      </div>
+                      <Field label="檢測認證">
+                        <Input
+                          value={productForm.certifications}
+                          onChange={(e) =>
+                            setProductForm((v) => ({ ...v, certifications: e.target.value }))
+                          }
+                          placeholder="例如：SGS、CE"
+                        />
+                      </Field>
+                    </FormSection>
+                    <FormSection
+                      eyebrow="06"
+                      title="商品圖片"
+                      description="上傳商品圖後可以先用 AI 辨識帶入草稿，再由你確認資料。"
+                    >
+                      <Field label="商品圖片">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={(e) => setProductFiles(Array.from(e.target.files ?? []))}
+                          className="block w-full text-sm text-neutral-600 file:mr-3 file:rounded-md file:border-0 file:bg-neutral-900 file:px-3 file:py-2 file:text-sm file:text-white"
+                        />
+                        <p className="text-xs text-neutral-500">
+                          {productFiles.length > 0
+                            ? `已選擇 ${productFiles.length} 個檔案，送出商品後會一併上傳。`
+                            : "支援多張圖片，上傳後會存入本地 public 資產路徑；部署時可用 ASSET_BASE_URL 接 CDN。"}
+                        </p>
+                      </Field>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void analyzeProductImages()}
+                          disabled={analyzingImages || productFiles.length === 0}
+                        >
+                          {analyzingImages ? "辨識中..." : "AI 辨識圖片並預填"}
+                        </Button>
+                        {draftConfidence != null ? (
+                          <span className="text-sm text-neutral-500">
+                            辨識信心 {Math.round(draftConfidence * 100)}%
+                          </span>
+                        ) : null}
+                      </div>
+                      {draftImages.length > 0 ? (
+                        <div className="rounded-md border bg-neutral-50 p-3">
+                          <div className="text-sm font-medium">已上傳草稿圖片</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {draftImages.map((image, index) => (
+                              <img
+                                key={`draft-image-${index}`}
+                                src={image}
+                                alt="draft"
+                                className="h-20 w-20 rounded-md border object-cover"
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ) : null}
-                    </div>
-                    {draftImages.length > 0 ? (
-                      <div className="rounded-md border bg-neutral-50 p-3">
-                        <div className="text-sm font-medium">已上傳草稿圖片</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {draftImages.map((image, index) => (
-                            <img
-                              key={`draft-image-${index}`}
-                              src={image}
-                              alt="draft"
-                              className="h-20 w-20 rounded-md border object-cover"
-                            />
-                          ))}
+                      {Object.keys(draftAttributes).length > 0 ? (
+                        <div className="rounded-md border bg-neutral-50 p-3">
+                          <div className="text-sm font-medium">AI 辨識到的商品特徵</div>
+                          <div className="mt-3 grid gap-2 md:grid-cols-2">
+                            {Object.entries(draftAttributes).map(([key, value]) => (
+                              <div key={key} className="rounded border bg-white px-3 py-2 text-sm">
+                                <div className="text-neutral-500">{key}</div>
+                                <div className="font-medium">{value}</div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
-                    {Object.keys(draftAttributes).length > 0 ? (
-                      <div className="rounded-md border bg-neutral-50 p-3">
-                        <div className="text-sm font-medium">AI 辨識到的商品特徵</div>
-                        <div className="mt-3 grid gap-2 md:grid-cols-2">
-                          {Object.entries(draftAttributes).map(([key, value]) => (
-                            <div key={key} className="rounded border bg-white px-3 py-2 text-sm">
-                              <div className="text-neutral-500">{key}</div>
-                              <div className="font-medium">{value}</div>
-                            </div>
-                          ))}
+                      ) : null}
+                      {editingProductId ? (
+                        <div className="rounded-md border bg-neutral-50 p-3">
+                          <div className="text-sm font-medium">目前圖片</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {(myProducts.find((product) => product.id === editingProductId)?.images ?? []).length === 0 ? (
+                              <div className="text-sm text-neutral-500">目前沒有圖片。</div>
+                            ) : (
+                              myProducts
+                                .find((product) => product.id === editingProductId)
+                                ?.images.map((image, index) => (
+                                  <img
+                                    key={`${editingProductId}-${index}`}
+                                    src={image}
+                                    alt="product"
+                                    className="h-20 w-20 rounded-md border object-cover"
+                                  />
+                                ))
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
-                    {editingProductId ? (
-                      <div className="rounded-md border bg-neutral-50 p-3">
-                        <div className="text-sm font-medium">目前圖片</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {(myProducts.find((product) => product.id === editingProductId)?.images ?? []).length === 0 ? (
-                            <div className="text-sm text-neutral-500">目前沒有圖片。</div>
-                          ) : (
-                            myProducts
-                              .find((product) => product.id === editingProductId)
-                              ?.images.map((image, index) => (
-                                <img
-                                  key={`${editingProductId}-${index}`}
-                                  src={image}
-                                  alt="product"
-                                  className="h-20 w-20 rounded-md border object-cover"
-                                />
-                              ))
-                          )}
-                        </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </FormSection>
                     <div className="flex items-center gap-3">
                       <Button type="submit" disabled={savingProduct || uploadingImages}>
                         {savingProduct ? (editingProductId ? "更新中..." : "建立中...") : editingProductId ? "更新商品" : "建立商品"}
@@ -1923,6 +2081,7 @@ export default function TradePage() {
           </Card>
         </TabsContent>
       </Tabs>
+      </div>
     </div>
   );
 }
@@ -1932,6 +2091,144 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-2">
       <Label className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+function FormSection({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="overflow-visible rounded-[22px] border border-neutral-200 bg-white p-4 shadow-sm md:p-5">
+      <div className="mb-5 flex flex-col gap-2 border-b border-neutral-100 pb-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-neutral-400">{eyebrow}</div>
+          <h3 className="mt-1 text-lg font-semibold tracking-tight text-neutral-950">{title}</h3>
+        </div>
+        <p className="max-w-xl text-sm leading-6 text-neutral-500">{description}</p>
+      </div>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
+
+function TradeTextarea({
+  value,
+  onChange,
+  placeholder,
+  required = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  return (
+    <textarea
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      required={required}
+      className="min-h-24 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm leading-6 text-neutral-900 outline-none transition focus-visible:ring-2 focus-visible:ring-neutral-900"
+    />
+  );
+}
+
+function SearchablePicker({
+  value,
+  onChange,
+  options,
+  placeholder,
+  emptyLabel,
+  required = false,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+  emptyLabel?: string;
+  required?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleOptions = normalizedQuery
+    ? options.filter((option) => option.toLowerCase().includes(normalizedQuery))
+    : options;
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+        <Input
+          value={open ? query : value}
+          onFocus={() => {
+            setQuery(value);
+            setOpen(true);
+          }}
+          onBlur={() => {
+            window.setTimeout(() => setOpen(false), 120);
+          }}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            setQuery(nextValue);
+            onChange(nextValue);
+            setOpen(true);
+          }}
+          placeholder={placeholder}
+          required={required}
+          className="pl-9"
+        />
+      </div>
+      {open ? (
+        <div className="absolute z-40 mt-2 w-full overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg">
+          <div className="max-h-64 overflow-y-auto py-1">
+            {emptyLabel ? (
+              <button
+                type="button"
+                className="flex w-full items-center px-3 py-2 text-left text-sm text-neutral-600 hover:bg-neutral-50"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setQuery("");
+                  onChange("");
+                  setOpen(false);
+                }}
+              >
+                {emptyLabel}
+              </button>
+            ) : null}
+            {visibleOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-neutral-800 hover:bg-neutral-50"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setQuery(option);
+                  onChange(option);
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">{option}</span>
+                {option === value ? <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" /> : null}
+              </button>
+            ))}
+            {visibleOptions.length === 0 ? (
+              <div className="px-3 py-3 text-sm text-neutral-500">
+                沒有相符分類，會保留你輸入的「{query.trim()}」。
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

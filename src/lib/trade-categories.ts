@@ -31,12 +31,18 @@ export async function ensureTradeCategoryTable() {
       "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "TradeCategory"
+    ALTER COLUMN "id" SET DEFAULT gen_random_uuid(),
+    ALTER COLUMN "created_at" SET DEFAULT CURRENT_TIMESTAMP,
+    ALTER COLUMN "updated_at" SET DEFAULT CURRENT_TIMESTAMP;
+  `);
 
   for (const category of DEFAULT_TRADE_CATEGORIES) {
     await prisma.$executeRawUnsafe(
       `
-        INSERT INTO "TradeCategory" ("name", "slug", "sort_order", "active")
-        VALUES ($1, $2, $3, true)
+        INSERT INTO "TradeCategory" ("id", "name", "slug", "sort_order", "active")
+        VALUES (gen_random_uuid(), $1, $2, $3, true)
         ON CONFLICT ("slug") DO UPDATE
         SET "name" = EXCLUDED."name",
             "sort_order" = EXCLUDED."sort_order";
@@ -65,8 +71,8 @@ export async function createTradeCategory(name: string, slug: string, sortOrder:
   await ensureTradeCategoryTable();
   const rows = await prisma.$queryRawUnsafe<TradeCategoryRecord[]>(
     `
-      INSERT INTO "TradeCategory" ("name", "slug", "sort_order", "active")
-      VALUES ($1, $2, $3, true)
+      INSERT INTO "TradeCategory" ("id", "name", "slug", "sort_order", "active")
+      VALUES (gen_random_uuid(), $1, $2, $3, true)
       RETURNING "id", "name", "slug", "sort_order", "active", "created_at", "updated_at"
     `,
     name,

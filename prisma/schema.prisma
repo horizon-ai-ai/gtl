@@ -33,25 +33,29 @@ model User {
   updated_at        DateTime   @updatedAt
   deleted_at        DateTime?
 
-  company                  CompanyProfile?
-  oauth_accounts           OAuthAccount[]
-  sessions                 Session[]
-  password_reset_tokens    PasswordResetToken[]
+  company                   CompanyProfile?
+  oauth_accounts            OAuthAccount[]
+  sessions                  Session[]
+  password_reset_tokens     PasswordResetToken[]
   email_verification_tokens EmailVerificationToken[]
-  subscription             Subscription?
-  invoices       Invoice[]
-  token_packs    TokenPack[]
-  usages         UserUsage[]
-  conversations  Conversation[]
-  orders         Order[]
-  sites          Site[]
-  trade_profile  TradeProfile?
-  products       Product[]      @relation("seller_products")
-  inquiries_sent Inquiry[]      @relation("buyer_inquiries")
-  inquiries_recv Inquiry[]      @relation("seller_inquiries")
-  ga_connections GoogleAnalyticsConnection[]
-  analytics_insights AnalyticsInsight[]
-  analytics_tool_calls AnalyticsToolCall[]
+  subscription              Subscription?
+  invoices                  Invoice[]
+  token_packs               TokenPack[]
+  project_payments          ProjectPayment[]
+  point_wallet              PointWallet?
+  point_transactions        PointTransaction[]
+  meetings                  Meeting[]
+  usages                    UserUsage[]
+  conversations             Conversation[]
+  orders                    Order[]
+  sites                     Site[]
+  trade_profile             TradeProfile?
+  products                  Product[]                   @relation("seller_products")
+  inquiries_sent            Inquiry[]                   @relation("buyer_inquiries")
+  inquiries_recv            Inquiry[]                   @relation("seller_inquiries")
+  ga_connections            GoogleAnalyticsConnection[]
+  analytics_insights        AnalyticsInsight[]
+  analytics_tool_calls      AnalyticsToolCall[]
 
   @@index([status, created_at])
 }
@@ -252,19 +256,24 @@ model UserUsage {
 // CHAT
 // =====================
 model Conversation {
-  id              String    @id @default(uuid()) @db.Uuid
-  user_id         String    @db.Uuid
-  user            User      @relation(fields: [user_id], references: [id])
-  title           String    @default("新對話")
-  category        String?
-  pinned          Boolean   @default(false)
-  archived        Boolean   @default(false)
-  last_message_at DateTime?
-  created_at      DateTime  @default(now())
-  updated_at      DateTime  @updatedAt
-  deleted_at      DateTime?
+  id                    String    @id @default(uuid()) @db.Uuid
+  user_id               String    @db.Uuid
+  user                  User      @relation(fields: [user_id], references: [id])
+  title                 String    @default("新對話")
+  category              String?
+  pinned                Boolean   @default(false)
+  archived              Boolean   @default(false)
+  last_message_at       DateTime?
+  ai_model              String?
+  active_design_task_id String?   @db.Uuid
+  shared_brand_context  Json?
+  project_memory        Json?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+  deleted_at            DateTime?
 
-  messages Message[]
+  messages     Message[]
+  design_tasks DesignTask[]
 
   @@index([user_id, last_message_at(sort: Desc)])
 }
@@ -274,8 +283,12 @@ model Message {
   conversation_id String       @db.Uuid
   conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
   role            MessageRole
+  message_type    MessageType  @default(ai)
   content         Json
   tool_calls      Json?
+  metadata        Json?
+  design_task_id  String?      @db.Uuid
+  design_task     DesignTask?  @relation(fields: [design_task_id], references: [id], onDelete: SetNull)
   tokens_input    Int          @default(0)
   tokens_output   Int          @default(0)
   credits_used    BigInt       @default(0)
@@ -283,6 +296,7 @@ model Message {
   created_at      DateTime     @default(now())
 
   @@index([conversation_id, created_at])
+  @@index([design_task_id, created_at])
 }
 
 enum MessageRole {
@@ -290,6 +304,97 @@ enum MessageRole {
   assistant
   tool
   system
+}
+
+enum MessageType {
+  ai
+  generation_result
+  system
+}
+
+// =====================
+// DESIGN TASK
+// =====================
+model DesignTask {
+  id                         String             @id @default(uuid()) @db.Uuid
+  conversation_id            String             @db.Uuid
+  conversation               Conversation       @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  user_id                    String             @db.Uuid
+  task_type                  DesignTaskType
+  template_key               String
+  template_label             String?
+  execution_strategy         ExecutionStrategy?
+  preferred_model            String?
+  title                      String
+  status                     DesignTaskStatus   @default(active)
+  priority                   Int                @default(0)
+  output_count               Int                @default(1)
+  summary                    String?
+  collected_data             Json?
+  resolved_requirements      Json?
+  missing_requirements       Json?
+  current_clarification_goal Json?
+  clarification_count        Int                @default(0)
+  last_activity_at           DateTime?
+  created_at                 DateTime           @default(now())
+  updated_at                 DateTime           @updatedAt
+
+  messages Message[]
+
+  @@index([conversation_id, last_activity_at(sort: Desc)])
+  @@index([user_id, status])
+  @@index([task_type, status])
+}
+
+enum DesignTaskStatus {
+  active
+  paused
+  collecting
+  completed
+  archived
+}
+
+enum DesignTaskType {
+  logo
+  vi
+  brand_guideline
+  business_card
+  dm
+  poster
+  catalog
+  menu
+  invitation_card
+  sticker
+  packaging
+  social_post
+  banner
+  edm
+  brand_website
+  landing_page
+  ecommerce_website
+  event_backdrop
+  x_banner
+  standing_sign
+  hand_held_sign
+  banner_cloth
+  outdoor_signboard
+  store_sign
+  merchandise
+  gift
+  illustration
+  design_modification
+  social_copy
+  seo_article
+  website_audit
+  annual_marketing_strategy
+  ads_strategy
+}
+
+enum ExecutionStrategy {
+  direct_image
+  structured_composition
+  structured_text
+  image_edit
 }
 
 // =====================
@@ -301,6 +406,12 @@ model Order {
   user            User        @relation(fields: [user_id], references: [id])
   order_no        String      @unique
   conversation_id String?     @db.Uuid
+  project_type    ProjectOrderType?
+  title           String?
+  requirements_summary String?
+  deliverable_snapshot Json?
+  assigned_reviewer_id String? @db.Uuid
+  cancel_reason   ProjectCancelReason?
   status          OrderStatus @default(draft)
   customer        Json
   subtotal        Int
@@ -310,12 +421,23 @@ model Order {
   currency        String      @default("TWD")
   notes           String?
   metadata        Json?
+  submitted_at    DateTime?
+  confirmed_at    DateTime?
+  closed_at       DateTime?
+  cancelled_at    DateTime?
   created_at      DateTime    @default(now())
   updated_at      DateTime    @updatedAt
   deleted_at      DateTime?
 
-  items  OrderItem[]
-  events OrderEvent[]
+  items          OrderItem[]
+  events         OrderEvent[]
+  quotes         ProjectQuote[]
+  payments       ProjectPayment[]
+  revision_quota RevisionQuota?
+  messages       OrderMessage[]
+  review_items   ReviewItem[]
+  meetings       Meeting[]
+  status_history OrderStatusHistory[]
 
   @@index([user_id, created_at(sort: Desc)])
   @@index([status])
@@ -329,6 +451,26 @@ enum OrderStatus {
   completed
   canceled
   refunded
+  quote_pending
+  quoted
+  confirmed
+  in_execution
+  closed
+  cancelled
+}
+
+enum ProjectOrderType {
+  website
+  product_page
+  copywriting
+  design
+  project
+}
+
+enum ProjectCancelReason {
+  user
+  quote_expired
+  admin
 }
 
 model OrderItem {
@@ -351,6 +493,191 @@ model OrderEvent {
   data       Json?
   actor      String
   created_at DateTime @default(now())
+}
+
+model ProjectQuote {
+  id                 String      @id @default(uuid()) @db.Uuid
+  order_id           String      @db.Uuid
+  order              Order       @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  amount             Int
+  deposit_amount     Int
+  currency           String      @default("TWD")
+  cancellation_terms String
+  valid_days         Int
+  quoted_at          DateTime    @default(now())
+  expires_at         DateTime
+  status             QuoteStatus @default(active)
+  quoted_by          String      @db.Uuid
+  created_at         DateTime    @default(now())
+  updated_at         DateTime    @updatedAt
+
+  @@index([order_id, status])
+  @@index([status, expires_at])
+}
+
+enum QuoteStatus {
+  active
+  accepted
+  expired
+  superseded
+}
+
+model ProjectPayment {
+  id            String        @id @default(uuid()) @db.Uuid
+  order_id      String?       @db.Uuid
+  order         Order?        @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  customer_id   String        @db.Uuid
+  customer      User          @relation(fields: [customer_id], references: [id])
+  kind          PaymentKind
+  amount        Int
+  method        PaymentMethod
+  status        PaymentStatus @default(pending)
+  refund_amount Int?
+  invoice_id    String?       @db.Uuid
+  paid_at       DateTime?
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @updatedAt
+
+  @@index([order_id, kind])
+  @@index([customer_id, created_at])
+}
+
+enum PaymentKind {
+  deposit
+  revision_quota
+  points_topup
+}
+
+enum PaymentMethod {
+  card
+  transfer
+  points
+  manual
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+  partial_refund
+  failed
+}
+
+model PointWallet {
+  customer_id String   @id @db.Uuid
+  customer    User     @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  balance     Int      @default(0)
+  updated_at  DateTime @updatedAt
+}
+
+model PointTransaction {
+  id           String          @id @default(uuid()) @db.Uuid
+  customer_id  String          @db.Uuid
+  customer     User            @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  delta        Int
+  reason       PointTxnReason
+  ref_order_id String?         @db.Uuid
+  created_at   DateTime        @default(now())
+
+  @@index([customer_id, created_at])
+  @@index([ref_order_id])
+}
+
+enum PointTxnReason {
+  ai_usage
+  topup
+  buy_revision
+  refund
+}
+
+model RevisionQuota {
+  order_id   String   @id @db.Uuid
+  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  total      Int      @default(0)
+  used       Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+model OrderMessage {
+  id                String                 @id @default(uuid()) @db.Uuid
+  order_id          String                 @db.Uuid
+  order             Order                  @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  sender_role       OrderMessageSenderRole
+  sender_id         String?                @db.Uuid
+  kind              OrderMessageKind       @default(message)
+  body              String
+  attachments       Json?
+  consumes_revision Boolean                @default(false)
+  read_at           DateTime?
+  created_at        DateTime               @default(now())
+
+  @@index([order_id, created_at])
+}
+
+enum OrderMessageSenderRole {
+  customer
+  reviewer
+  system
+}
+
+enum OrderMessageKind {
+  message
+  progress_update
+  revision_request
+  system_event
+}
+
+model ReviewItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  order_id   String   @db.Uuid
+  order      Order    @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  label      String
+  checked    Boolean  @default(false)
+  detail     String?
+  result     Json?
+  sort_order Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([order_id, sort_order])
+}
+
+model Meeting {
+  id           String        @id @default(uuid()) @db.Uuid
+  order_id     String        @db.Uuid
+  order        Order         @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  customer_id  String        @db.Uuid
+  customer     User          @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  scheduled_at DateTime
+  duration_min Int
+  status       MeetingStatus @default(requested)
+  link_or_note String?
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+
+  @@index([order_id, scheduled_at])
+  @@index([customer_id, scheduled_at])
+}
+
+enum MeetingStatus {
+  requested
+  confirmed
+  done
+  cancelled
+}
+
+model OrderStatusHistory {
+  id          String      @id @default(uuid()) @db.Uuid
+  order_id    String      @db.Uuid
+  order       Order       @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  from_status OrderStatus?
+  to_status   OrderStatus
+  actor_id    String?     @db.Uuid
+  reason      String?
+  created_at  DateTime    @default(now())
+
+  @@index([order_id, created_at])
 }
 
 // =====================
@@ -610,23 +937,23 @@ model Announcement {
 // ANALYTICS INTEGRATION
 // =====================
 model GoogleAnalyticsConnection {
-  id                       String   @id @default(cuid())
-  user_id                  String   @db.Uuid
-  user                     User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                       String    @id @default(cuid())
+  user_id                  String    @db.Uuid
+  user                     User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   google_account_email     String
   property_id              String
   property_name            String
   measurement_id           String?
-  refresh_token_ciphertext String   @db.Text
+  refresh_token_ciphertext String    @db.Text
   refresh_token_iv         String
   refresh_token_tag        String
-  access_token             String?  @db.Text
+  access_token             String?   @db.Text
   access_token_expires_at  DateTime?
   scopes                   String[]
-  status                   String   @default("active")
+  status                   String    @default("active")
   last_sync_at             DateTime?
-  created_at               DateTime @default(now())
-  updated_at               DateTime @updatedAt
+  created_at               DateTime  @default(now())
+  updated_at               DateTime  @updatedAt
 
   snapshots AnalyticsSnapshot[]
   insights  AnalyticsInsight[]
@@ -636,7 +963,7 @@ model GoogleAnalyticsConnection {
 }
 
 model AnalyticsSnapshot {
-  id            String   @id @default(cuid())
+  id            String                    @id @default(cuid())
   connection_id String
   connection    GoogleAnalyticsConnection @relation(fields: [connection_id], references: [id], onDelete: Cascade)
   query_hash    String
@@ -644,7 +971,7 @@ model AnalyticsSnapshot {
   dimensions    String[]
   metrics       String[]
   result        Json
-  fetched_at    DateTime @default(now())
+  fetched_at    DateTime                  @default(now())
   expires_at    DateTime
 
   @@index([connection_id, query_hash, fetched_at])
@@ -652,19 +979,19 @@ model AnalyticsSnapshot {
 }
 
 model AnalyticsInsight {
-  id              String   @id @default(cuid())
-  user_id         String   @db.Uuid
-  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id              String                    @id @default(cuid())
+  user_id         String                    @db.Uuid
+  user            User                      @relation(fields: [user_id], references: [id], onDelete: Cascade)
   connection_id   String
   connection      GoogleAnalyticsConnection @relation(fields: [connection_id], references: [id], onDelete: Cascade)
-  conversation_id String?  @db.Uuid
+  conversation_id String?                   @db.Uuid
   type            String
-  severity        String   @default("info")
+  severity        String                    @default("info")
   title           String
-  body            String   @db.Text
+  body            String                    @db.Text
   data_ref        Json
   acknowledged_at DateTime?
-  created_at      DateTime @default(now())
+  created_at      DateTime                  @default(now())
 
   @@index([user_id, created_at])
   @@index([user_id, type, acknowledged_at])

@@ -13,6 +13,9 @@ type Order = {
   id: string;
   order_no: string;
   status: string;
+  project_type?: string | null;
+  title?: string | null;
+  requirements_summary?: string | null;
   customer: { name: string };
   total: number;
   currency: string;
@@ -30,6 +33,20 @@ const STATUS_LABEL: Record<string, string> = {
   completed: "已完成",
   canceled: "已取消",
   refunded: "已退款",
+  quote_pending: "等候報價",
+  quoted: "已報價",
+  confirmed: "已確認",
+  in_execution: "執行中",
+  closed: "結案",
+  cancelled: "已取消",
+};
+
+const PROJECT_TYPE_LABEL: Record<string, string> = {
+  website: "一頁式網站",
+  product_page: "商品頁",
+  copywriting: "行銷文案",
+  design: "設計專案",
+  project: "專案",
 };
 
 export default function OrdersPage() {
@@ -46,7 +63,8 @@ export default function OrdersPage() {
   }, []);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div className="p-8 max-w-6xl mx-auto pb-14">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">訂單管理</h1>
@@ -72,13 +90,16 @@ export default function OrdersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm text-neutral-500">{o.order_no}</div>
-                  <div className="font-medium mt-1">{o.customer.name}</div>
+                  <div className="font-medium mt-1">{o.title ?? o.customer.name}</div>
                   <div className="text-xs text-neutral-400 mt-1">
-                    {new Date(o.created_at).toLocaleString()} · {o.items.length} 項商品
+                    {new Date(o.created_at).toLocaleString()} ·{" "}
+                    {o.project_type
+                      ? PROJECT_TYPE_LABEL[o.project_type] ?? o.project_type
+                      : `${o.items.length} 項商品`}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-semibold">{formatTWD(o.total)}</div>
+                  <div className="font-semibold">{o.project_type && o.total === 0 ? "待報價" : formatTWD(o.total)}</div>
                   <span className="inline-block mt-1 text-xs px-2 py-1 rounded bg-neutral-100">
                     {STATUS_LABEL[o.status] ?? o.status}
                   </span>
@@ -91,6 +112,14 @@ export default function OrdersPage() {
                   </div>
                 </div>
               </div>
+              {o.project_type && o.requirements_summary ? (
+                <div className="mt-4 rounded-md border bg-neutral-50 p-3">
+                  <div className="text-sm font-medium">需求摘要</div>
+                  <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-neutral-600">
+                    {o.requirements_summary}
+                  </p>
+                </div>
+              ) : null}
               {o.status === "draft" && (o.metadata?.suggested_items?.length || o.notes) ? (
                 <div className="mt-4 rounded-md border bg-neutral-50 p-3 space-y-3">
                   {o.metadata?.suggested_items?.length ? (
@@ -126,6 +155,7 @@ export default function OrdersPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
