@@ -16,6 +16,7 @@ import {
 import {
   activateDesignTask,
   getTaskTitle,
+  resolveRequestedModel,
   resolveTaskCreateInput,
   toInputJson,
 } from "@/lib/conversation/api";
@@ -217,7 +218,9 @@ export async function POST(req: NextRequest) {
   const planCode = sub?.plan.code ?? "free";
   const requestedModel =
     body.preferredModel?.trim() || body.selectedModel?.trim() || body.model?.trim() || "";
-  const model = requestedModel || activeTask?.preferred_model || pickModel({ plan: planCode });
+  // Never forward the raw client value: validate against the plan allowlist
+  // and clamp to the plan default on a miss.
+  const model = resolveRequestedModel(planCode, requestedModel || activeTask?.preferred_model);
   const taskContext = await buildDesignTaskSystemContext(activeTask);
 
   const encoder = new TextEncoder();

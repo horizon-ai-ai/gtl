@@ -109,6 +109,18 @@ export function pickConversationModels(plan = "free") {
   ].filter((model, index, models) => models.findIndex((item) => item.id === model.id) === index);
 }
 
+export function resolveRequestedModel(plan: string, requestedModel?: string | null): string {
+  // Clamp-on-miss: a client-supplied model is honored only when it belongs to
+  // the plan's allowlist (the same set the conversation models endpoint
+  // exposes). Absent, unknown, or out-of-plan ids fall back to the plan
+  // default instead of being forwarded to the provider.
+  const requested = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  if (requested && pickConversationModels(plan).some((model) => model.id === requested)) {
+    return requested;
+  }
+  return pickModel({ plan });
+}
+
 const taskTitleByType: Record<DesignTaskType, string> = {
   logo: "Logo Design",
   vi: "Brand VI",

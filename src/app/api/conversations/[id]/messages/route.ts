@@ -12,6 +12,7 @@ import {
   getTaskTitle,
   parseDesignTaskType,
   requireSessionUser,
+  resolveRequestedModel,
   resolveTaskCreateInput,
   shapeDesignTask,
   shapeMessage,
@@ -1057,7 +1058,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         : typeof body.model === "string" && body.model.trim()
           ? body.model.trim()
           : conversation.ai_model || task?.preferred_model || "";
-    const model = requestedModel || pickModel({ plan: planCode });
+    // Never forward the raw client value: validate against the plan allowlist
+    // and clamp to the plan default on a miss.
+    const model = resolveRequestedModel(planCode, requestedModel);
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
       userMessage: text,
