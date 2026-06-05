@@ -91,7 +91,10 @@ jest.mock("@/lib/gcis", () => ({
 }));
 
 type EmailPayload = { to: string; subject: string; text: string; html?: string };
-const sendEmailMock = jest.fn(async () => ({ skipped: true } as unknown));
+const sendEmailMock = jest.fn(async (payload: EmailPayload) => {
+  void payload;
+  return { skipped: true } as unknown;
+});
 jest.mock("@/lib/notify", () => ({
   sendEmail: (payload: EmailPayload) => sendEmailMock(payload),
 }));
@@ -142,7 +145,7 @@ describe("POST /api/auth/register — verification email", () => {
     expect(ttl).toBeGreaterThanOrEqual(23 * 60 * 60 * 1000);
     expect(ttl).toBeLessThanOrEqual(25 * 60 * 60 * 1000);
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
-    expect(sendEmailMock.mock.calls[0][0].to).toBe("bob@example.com");
+    expect(sendEmailMock.mock.calls[0]?.[0]?.to).toBe("bob@example.com");
   });
 
   it("still returns 200 and persists the user when sendEmail throws", async () => {

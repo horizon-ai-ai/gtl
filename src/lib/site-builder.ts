@@ -3,7 +3,22 @@ import { flexionStream, pickModel } from "./flexion";
 import type { TradeProductDraft } from "./trade-vision";
 
 export type SitePageSection = {
-  type: "hero" | "features" | "cta" | "faq" | "testimonials" | "story" | "gallery" | "specs" | "inquiry";
+  type:
+    | "hero"
+    | "features"
+    | "products"
+    | "productDetails"
+    | "socialProof"
+    | "closingInfo"
+    | "cta"
+    | "faq"
+    | "testimonials"
+    | "story"
+    | "gallery"
+    | "specs"
+    | "inquiry";
+  layoutVariant?: string;
+  variantFamily?: "product" | "brand";
   title?: string;
   body?: string;
   image_url?: string;
@@ -15,6 +30,19 @@ export type SiteSchema = {
   title: string;
   tagline: string;
   primary_color: string;
+  logo_url?: string;
+  design_style?: string;
+  design_brief?: string;
+  design_tokens?: {
+    bg?: string;
+    panel?: string;
+    ink?: string;
+    muted?: string;
+    line?: string;
+    shadow?: string;
+    accent?: string;
+  };
+  site_intent?: string;
   product_images?: string[];
   product?: {
     linked_product_id?: string;
@@ -40,6 +68,11 @@ const FALLBACK_SCHEMA: SiteSchema = {
   title: "Marketing Landing Page",
   tagline: "用 AI 快速建立你的第一個行銷網站",
   primary_color: "#171717",
+  logo_url: undefined,
+  design_style: "minimal-luxury",
+  design_brief: undefined,
+  design_tokens: undefined,
+  site_intent: "product_intro",
   product_images: [],
   product: {},
   inquiry_cta_label: "立即詢價",
@@ -51,15 +84,20 @@ const FALLBACK_SCHEMA: SiteSchema = {
   integrations: {},
   sections: [
     { type: "hero", title: "品牌主標題", body: "一句話說明你的產品價值。", button_label: "立即詢價" },
-    { type: "story", title: "商品亮點", items: ["亮點一", "亮點二", "亮點三"] },
-    { type: "specs", title: "規格資訊", items: ["規格一", "規格二", "規格三"] },
-    { type: "cta", title: "對這項商品有興趣？", body: "直接點擊下方按鈕，立即詢價。", button_label: "立即詢價" },
+    { type: "features", layoutVariant: "painpoint.p1", title: "商品亮點", items: ["亮點一", "亮點二", "亮點三"] },
+    { type: "products", layoutVariant: "solution.s1", title: "精選商品", items: ["商品一", "商品二", "商品三"] },
+    { type: "productDetails", layoutVariant: "details.d1", title: "規格資訊", items: ["規格一", "規格二", "規格三"] },
+    { type: "closingInfo", layoutVariant: "closing.c1", title: "對這項商品有興趣？", body: "直接點擊下方按鈕，立即詢價。", button_label: "立即詢價" },
   ],
 };
 
 const SECTION_TYPES: SitePageSection["type"][] = [
   "hero",
   "features",
+  "products",
+  "productDetails",
+  "socialProof",
+  "closingInfo",
   "cta",
   "faq",
   "testimonials",
@@ -84,6 +122,34 @@ function parseSchema(raw: string): SiteSchema {
         title: json.title || FALLBACK_SCHEMA.title,
         tagline: json.tagline || FALLBACK_SCHEMA.tagline,
         primary_color: json.primary_color || FALLBACK_SCHEMA.primary_color,
+        logo_url:
+          typeof json.logo_url === "string" && json.logo_url.trim()
+            ? json.logo_url.trim()
+            : FALLBACK_SCHEMA.logo_url,
+        design_style:
+          typeof json.design_style === "string" && json.design_style.trim()
+            ? json.design_style.trim()
+            : FALLBACK_SCHEMA.design_style,
+        design_brief:
+          typeof json.design_brief === "string" && json.design_brief.trim()
+            ? json.design_brief.trim()
+            : FALLBACK_SCHEMA.design_brief,
+        design_tokens:
+          json.design_tokens && typeof json.design_tokens === "object"
+            ? {
+                bg: typeof json.design_tokens.bg === "string" ? json.design_tokens.bg : undefined,
+                panel: typeof json.design_tokens.panel === "string" ? json.design_tokens.panel : undefined,
+                ink: typeof json.design_tokens.ink === "string" ? json.design_tokens.ink : undefined,
+                muted: typeof json.design_tokens.muted === "string" ? json.design_tokens.muted : undefined,
+                line: typeof json.design_tokens.line === "string" ? json.design_tokens.line : undefined,
+                shadow: typeof json.design_tokens.shadow === "string" ? json.design_tokens.shadow : undefined,
+                accent: typeof json.design_tokens.accent === "string" ? json.design_tokens.accent : undefined,
+              }
+            : FALLBACK_SCHEMA.design_tokens,
+        site_intent:
+          typeof json.site_intent === "string" && json.site_intent.trim()
+            ? json.site_intent.trim()
+            : FALLBACK_SCHEMA.site_intent,
         product_images: Array.isArray(json.product_images)
           ? json.product_images
               .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -139,6 +205,11 @@ function parseSchema(raw: string): SiteSchema {
                 const raw = section as Record<string, unknown>;
                 return {
                   type: normalizeSectionType(raw.type),
+                  layoutVariant: typeof raw.layoutVariant === "string" ? raw.layoutVariant : undefined,
+                  variantFamily:
+                    raw.variantFamily === "product" || raw.variantFamily === "brand"
+                      ? raw.variantFamily
+                      : undefined,
                   title: typeof raw.title === "string" ? raw.title : undefined,
                   body: typeof raw.body === "string" ? raw.body : undefined,
                   image_url: typeof raw.image_url === "string" ? raw.image_url : undefined,

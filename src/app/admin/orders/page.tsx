@@ -71,6 +71,12 @@ export default async function AdminOrdersPage({
             <option value="completed">completed</option>
             <option value="canceled">canceled</option>
             <option value="refunded">refunded</option>
+            <option value="quote_pending">quote_pending</option>
+            <option value="quoted">quoted</option>
+            <option value="confirmed">confirmed</option>
+            <option value="in_execution">in_execution</option>
+            <option value="closed">closed</option>
+            <option value="cancelled">cancelled</option>
           </select>
           <button type="submit" className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white">
             搜尋
@@ -89,6 +95,7 @@ export default async function AdminOrdersPage({
               <th className="text-left p-3">平台用戶</th>
               <th className="text-left p-3">客戶</th>
               <th className="text-left p-3">金額</th>
+              <th className="text-left p-3">類型</th>
               <th className="text-left p-3">狀態</th>
               <th className="text-left p-3">建立日</th>
             </tr>
@@ -107,6 +114,7 @@ export default async function AdminOrdersPage({
                 </td>
                 <td className="p-3">{(order.customer as { name?: string }).name ?? "—"}</td>
                 <td className="p-3">{formatTWD(order.total)}</td>
+                <td className="p-3">{order.project_type ?? "commerce"}</td>
                 <td className="p-3">{order.status}</td>
                 <td className="p-3 text-neutral-500">
                   {new Date(order.created_at).toLocaleDateString()}

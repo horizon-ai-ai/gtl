@@ -16,6 +16,8 @@ type PuckBlock = {
     buttonLabel?: string;
     imageUrl?: string;
     itemsText?: string;
+    layoutVariant?: string;
+    variantFamily?: string;
   };
 };
 
@@ -58,6 +60,10 @@ function mapSectionTypeToBlockType(type: SitePageSection["type"]): PuckBlockType
     case "inquiry":
       return "CtaBlock";
     case "features":
+    case "products":
+    case "productDetails":
+    case "socialProof":
+    case "closingInfo":
     case "faq":
     case "testimonials":
     default:
@@ -94,6 +100,8 @@ export function siteSchemaToPuckData(schema: SiteSchema): PuckDataShape {
         buttonLabel: section.button_label,
         imageUrl: section.image_url,
         itemsText: sectionItemsToText(section.items),
+        layoutVariant: section.layoutVariant,
+        variantFamily: section.variantFamily,
       },
     })),
   };
@@ -102,14 +110,23 @@ export function siteSchemaToPuckData(schema: SiteSchema): PuckDataShape {
 export function puckDataToSiteSchema(schema: SiteSchema, data: PuckDataShape): SiteSchema {
   return {
     ...schema,
-    sections: (data.content ?? []).map((block) => ({
-      type: mapBlockTypeToSectionType(block.type),
-      title: block.props.title?.trim() || undefined,
-      body: block.props.body?.trim() || undefined,
-      button_label: block.props.buttonLabel?.trim() || undefined,
-      image_url: block.props.imageUrl?.trim() || undefined,
-      items: itemsTextToItems(block.props.itemsText),
-    })),
+    sections: (data.content ?? []).map((block, index) => {
+      const previous = schema.sections[index];
+      const mappedType = mapBlockTypeToSectionType(block.type);
+      return {
+        type: block.type === "FeatureListBlock" && previous ? previous.type : mappedType,
+        layoutVariant: block.props.layoutVariant?.trim() || previous?.layoutVariant,
+        variantFamily:
+          block.props.variantFamily === "product" || block.props.variantFamily === "brand"
+            ? block.props.variantFamily
+            : previous?.variantFamily,
+        title: block.props.title?.trim() || undefined,
+        body: block.props.body?.trim() || undefined,
+        button_label: block.props.buttonLabel?.trim() || undefined,
+        image_url: block.props.imageUrl?.trim() || undefined,
+        items: itemsTextToItems(block.props.itemsText),
+      };
+    }),
   };
 }
 

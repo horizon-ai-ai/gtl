@@ -4,6 +4,9 @@ import { fail, handleError, ok } from "@/lib/api";
 import { assertTradeModuleAccess } from "@/lib/trade";
 import { getActiveTradeCategories } from "@/lib/trade-categories";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const session = await auth();
@@ -24,7 +27,9 @@ export async function GET() {
       new Set(rows.map((row) => row.hs_code).filter((value): value is string => Boolean(value)))
     );
 
-    return ok({ categories: categories.map((category) => category.name), hs_codes });
+    const response = ok({ categories: categories.map((category) => category.name), hs_codes });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (err) {
     return handleError(err);
   }
