@@ -95,10 +95,14 @@ export function defaultReviewItems(orderType: string) {
   ];
 }
 
-export async function ensureRevisionAvailable(orderId: string) {
-  const quota = await prisma.revisionQuota.findUnique({ where: { order_id: orderId } });
-  if (!quota || quota.used >= quota.total) {
+export async function consumeRevisionQuota(tx: Prisma.TransactionClient, orderId: string) {
+  // Atomic guarded increment: only succeeds while used < total, so
+  // concurrent revision requests cannot over-consume the quota.
+  const consumed = await tx.revisionQuota.updateMany({
+    where: { order_id: orderId, used: { lt: prisma.revisionQuota.fields.total } },
+    data: { used: { increment: 1 } },
+  });
+  if (consumed.count === 0) {
     throw new ApiError("BUSINESS_RULE_VIOLATION", "修改額度不足，請先加購修改額度");
   }
-  return quota;
 }

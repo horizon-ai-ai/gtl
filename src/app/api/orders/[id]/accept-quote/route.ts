@@ -31,6 +31,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (quote.expires_at.getTime() < Date.now()) throw new ApiError("BUSINESS_RULE_VIOLATION", "Quote expired");
 
     const updated = await prisma.$transaction(async (tx) => {
+      // Claim the order first with a status-guarded write: if a concurrent
+      // accept already moved it off the pre-accept status, zero rows match
+      // and this request aborts before any money/quota side-effect runs.
+      const claimed = await tx.order.updateMany({
+        where: { id: order.id, status: order.status },
+        data: { status: "confirmed", confirmed_at: new Date(), total: quote.amount, subtotal: quote.amount },
+      });
+      if (claimed.count === 0) {
+        throw new ApiError("CONFLICT", "Quote was already accepted or the order changed state");
+      }
       await tx.projectQuote.update({ where: { id: quote.id }, data: { status: "accepted" } });
       await tx.projectPayment.create({
         data: {
@@ -78,11 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           reason: "deposit_paid",
         },
       });
-      return tx.order.update({
-        where: { id: order.id },
-        data: { status: "confirmed", confirmed_at: new Date(), total: quote.amount, subtotal: quote.amount },
-        include: projectOrderInclude(),
-      });
+      return tx.order.findUniqueOrThrow({ where: { id: order.id }, include: projectOrderInclude() });
     });
 
     return ok(updated);

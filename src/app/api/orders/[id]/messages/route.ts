@@ -4,7 +4,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { ApiError, fail, handleError, ok } from "@/lib/api";
 import { prisma } from "@/lib/db";
-import { ensureRevisionAvailable } from "@/lib/project-orders";
+import { consumeRevisionQuota } from "@/lib/project-orders";
 
 const messageSchema = z.object({
   body: z.string().min(1).max(8000),
@@ -44,11 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const message = await prisma.$transaction(async (tx) => {
       if (body.kind === "revision_request") {
-        await ensureRevisionAvailable(order.id);
-        await tx.revisionQuota.update({
-          where: { order_id: order.id },
-          data: { used: { increment: 1 } },
-        });
+        await consumeRevisionQuota(tx, order.id);
       }
       return tx.orderMessage.create({
         data: {
