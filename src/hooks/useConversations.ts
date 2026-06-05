@@ -287,7 +287,7 @@ function mergeIncomingMessage(current: ChatMessage[], incoming: ChatMessage) {
   return sortMessages([...withoutDuplicates, incoming]);
 }
 
-function streamMessageFromEvent(event: MessageEvent, eventName: string) {
+export function streamMessageFromEvent(event: MessageEvent, eventName: string) {
   try {
     const envelope = JSON.parse(event.data) as { data?: unknown };
     const data = envelope.data;
@@ -295,11 +295,12 @@ function streamMessageFromEvent(event: MessageEvent, eventName: string) {
     const normalized = normalizeMessage(data as RawMessage);
     return {
       ...normalized,
+      // A completed assistant reply must render settled, not typing.
       isStreaming:
         eventName === "message.completed" &&
         normalized.role === "assistant" &&
         normalized.messageType === "ai"
-          ? true
+          ? false
           : normalized.isStreaming,
     };
   } catch {

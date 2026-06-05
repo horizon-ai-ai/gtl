@@ -964,6 +964,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  // Hoisted so the catch below can finalize an orphaned streaming placeholder.
+  let streamingAssistantMessage: Message | null = null;
+  let assistantFinalized = false;
   try {
     const user = await requireSessionUser();
     const conversation = await getOwnedConversation(params.id, user.id);
@@ -1124,7 +1127,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let assistantText = "";
     let usage = { input_tokens: 0, output_tokens: 0 };
     let completionModel = model;
-    let streamingAssistantMessage: Message | null = null;
 
     if (openingReply) {
       assistantText = openingReply;
@@ -1320,6 +1322,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             ...assistantPayload,
           },
         });
+    assistantFinalized = true;
 
     await prisma.conversation.update({
       where: { id: params.id },
@@ -1353,6 +1356,27 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       streaming: false,
     });
   } catch (err) {
+    if (streamingAssistantMessage && !assistantFinalized) {
+      // Never leave the placeholder stuck in `streaming` status: mark it
+      // failed so clients render a settled (failed) message instead of an
+      // eternally-typing one.
+      try {
+        const failedMessage = await prisma.message.update({
+          where: { id: streamingAssistantMessage.id },
+          data: {
+            metadata: {
+              ...((streamingAssistantMessage.metadata as Record<string, unknown>) ?? {}),
+              status: "failed",
+              phase: "failed",
+              errorMessage: err instanceof Error ? err.message : "completion failed",
+            } as Prisma.InputJsonValue,
+          },
+        });
+        publishConversationEvent(params.id, "message.updated", shapeMessage(failedMessage));
+      } catch (finalizeError) {
+        console.warn("[conversations/:id/messages] failed to finalize streaming placeholder:", finalizeError);
+      }
+    }
     return handleError(err);
   }
 }
