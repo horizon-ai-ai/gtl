@@ -7,7 +7,7 @@ import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
 import { prisma } from "@/lib/db";
 import { flexionComplete, pickModel, rawToCredits } from "@/lib/flexion";
 import { generateSiteSchema, slugifySiteName } from "@/lib/site-builder";
-import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
+import { dispatchImageGeneration, imageCreditCost } from "@/lib/conversation/generation-dispatcher";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import {
   getOwnedConversation,
@@ -147,7 +147,14 @@ export async function POST(
     });
     if (!task) throw new ApiError("RESOURCE_NOT_FOUND", "Design task not found");
 
-    await assertCreditsAvailable(user.id);
+    const domain = resolveTaskDomain(task.task_type);
+    // Image generation has a fixed, known cost — require the full amount
+    // before dispatching any paid work. Other domains keep the
+    // positive-balance check (their cost is only known after the call).
+    await assertCreditsAvailable(
+      user.id,
+      domain === "image" ? imageCreditCost(Math.max(1, task.output_count || 1)) : undefined,
+    );
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const requestedExecutionStrategy = parseExecutionStrategy(body.executionStrategy);
@@ -180,8 +187,6 @@ export async function POST(
       typeof body.sourceMessageId === "string" && body.sourceMessageId.trim()
         ? body.sourceMessageId.trim()
         : null;
-
-    const domain = resolveTaskDomain(task.task_type);
 
     if (domain === "web") {
       const siteName = stringValue(

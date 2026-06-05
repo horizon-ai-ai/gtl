@@ -49,8 +49,17 @@ export async function consumeCredits(userId: string, credits: bigint) {
   });
 }
 
-export async function assertCreditsAvailable(userId: string) {
+export async function assertCreditsAvailable(userId: string, cost?: bigint) {
   const available = await getAvailableCredits(userId);
+  // Fixed-cost operations (image generation) must cover the full cost before
+  // any paid work; post-hoc-cost operations (text chat) pass no cost and only
+  // need a positive balance, since the token cost is measured after the call.
+  if (cost !== undefined && cost > BigInt(0)) {
+    if (available < cost) {
+      throw new ApiError("INSUFFICIENT_CREDITS", "Not enough credits for this operation");
+    }
+    return;
+  }
   if (available <= BigInt(0)) {
     throw new ApiError("QUOTA_EXCEEDED", "Token credits exhausted for this period");
   }
