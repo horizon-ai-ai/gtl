@@ -17,7 +17,7 @@
 | Freebie (one-line) | #9 isStreaming inversion | resolved (fix-conversation-port-review-blockers) |
 | Fast-follow | #7 Stuck streaming placeholder | resolved (fix-conversation-port-review-blockers) |
 | Fast-follow / product question | #8 Puck positional corruption | open |
-| Blocker IF legacy sites exist in prod | #10 Legacy section render degradation | open |
+| ~~Blocker IF legacy sites exist in prod~~ → n/a | #10 Legacy section render degradation | not applicable — no legacy sites exist in prod (confirmed 2026-06-05) |
 
 #4–#6 share one root cause: check-then-act outside the transaction. Fix pattern: status-guarded `updateMany` / unique constraint / in-tx re-check.
 
