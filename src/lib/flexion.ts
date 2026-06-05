@@ -35,6 +35,8 @@ const MODEL_MULTIPLIER: Record<string, number> = {
   "claude-haiku-4-5": 1,
   "claude-sonnet-4-6": 5,
   "claude-opus-4-7": 25,
+  "gemini-3.1-pro-preview": 5,
+  "gpt-5.4": 10,
   "kimi-k2-turbo-preview": 2,
   "kimi-k2.5": 5,
   "kimi-k2.6": 5,
@@ -75,17 +77,16 @@ export function pickModel(opts: {
     return "kimi-k2.5";
   }
   if (plan === "free" || plan === "starter") {
-    return taskHint === "fast" ? "claude-haiku-4-5" : "claude-sonnet-4-6";
+    return taskHint === "fast" ? "gemini-3.1-pro-preview" : "gpt-5.4";
   }
   if (taskHint === "complex") return "claude-opus-4-7";
-  if (taskHint === "fast") return "claude-haiku-4-5";
-  return "claude-sonnet-4-6";
+  if (taskHint === "fast") return "gemini-3.1-pro-preview";
+  return "gpt-5.4";
 }
 
 const BASE_URL =
-  process.env.FLEXION_API_BASE_URL ||
-  (process.env.OPENROUTER_API_KEY ? "https://openrouter.ai/api/v1" : "");
-const API_KEY = process.env.FLEXION_API_KEY || process.env.OPENROUTER_API_KEY || "";
+  process.env.FLEXION_API_BASE_URL || "";
+const API_KEY = process.env.FLEXION_API_KEY || "";
 const MODEL_OVERRIDE = process.env.FLEXION_MODEL?.trim() ?? "";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
 const PROVIDER_TITLE = process.env.FLEXION_APP_TITLE || "Marketing AI Platform";

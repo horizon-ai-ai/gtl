@@ -288,7 +288,7 @@ function textLineCount(text: string) {
 
 function isTextArtifactMessage(message: ChatMessage) {
   if (message.messageType === "generation_result") return false;
-  if (message.role !== "user" && message.role !== "assistant") return false;
+  if (message.role !== "user") return false;
   if (typeof message.content !== "string") return false;
   const text = message.content.trim();
   if (!text) return false;

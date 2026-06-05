@@ -81,7 +81,7 @@ function appUrl() {
 }
 
 function openRouterKey() {
-  return process.env.OPENROUTER_API_KEY || process.env.FLEXION_API_KEY || "";
+  return process.env.MARKETING_INTELLIGENCE_API_KEY || process.env.OPENROUTER_API_KEY || "";
 }
 
 function safeJson(value: string): Record<string, unknown> | null {

@@ -20,7 +20,8 @@ function messageText(message: ChatMessage) {
   return "";
 }
 
-function isLongTextArtifact(text: string) {
+function isLongTextArtifact(message: ChatMessage, text: string) {
+  if (message.role !== "user") return false;
   if (text.length > 900) return true;
   return text.split("\n").length > 14;
 }
@@ -1031,7 +1032,7 @@ export default function ConversationInterface({
         const useCompactActions = isGenerationResult && !showGeneratedImagesInline;
         const shouldUseTextArtifact =
           !isGenerationResult &&
-          isLongTextArtifact(text) &&
+          isLongTextArtifact(message, text) &&
           (!message.isStreaming || completedStreamingIds.includes(message.id));
         const hasRenderableContent =
           isUser ||
