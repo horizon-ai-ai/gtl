@@ -11,6 +11,13 @@ export async function POST(_: NextRequest, { params }: { params: { id: string } 
     if (!order || order.deleted_at) throw new ApiError("RESOURCE_NOT_FOUND", "Order not found");
     assertProjectTransition(order.status, "in_execution");
 
+    const paidDeposit = await prisma.projectPayment.findFirst({
+      where: { order_id: order.id, kind: "deposit", status: "paid" },
+    });
+    if (!paidDeposit) {
+      throw new ApiError("BUSINESS_RULE_VIOLATION", "尚未收到已付訂金，無法開始執行");
+    }
+
     const updated = await prisma.order.update({
       where: { id: order.id },
       data: {

@@ -204,6 +204,13 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const existing = await findOwnedOrder(params.id, session.user.id);
     const body = updateSchema.parse(await req.json());
 
+    if (existing.project_type && body.status !== undefined) {
+      throw new ApiError(
+        "BUSINESS_RULE_VIOLATION",
+        "Project order status can only change through its dedicated transition routes"
+      );
+    }
+
     const items = body.items ?? existing.items.map((item) => ({
       id: item.id,
       name: item.name,
