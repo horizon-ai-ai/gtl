@@ -56,7 +56,7 @@ const authMock = jest.fn();
 jest.mock("@/lib/db", () => ({
   prisma: {
     order: orderDelegate,
-    $transaction: (...args: unknown[]) => transactionMock(),
+    $transaction: () => transactionMock(),
   },
 }));
 

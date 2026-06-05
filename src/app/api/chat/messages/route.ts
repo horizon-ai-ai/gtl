@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { fail } from "@/lib/api";
 import { detectRecommendedActions, extractSuggestedItems } from "@/lib/chat-handoff";
-import { flexionStream, pickModel, rawToCredits } from "@/lib/flexion";
+import { flexionStream, rawToCredits } from "@/lib/flexion";
 import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
 import {
   DesignTaskStatus,
