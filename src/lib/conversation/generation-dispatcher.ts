@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { DesignTaskStatus, MessageRole, MessageType, type DesignTask, type Prisma } from "@prisma/client";
 
 import { generateBananaImages } from "@/lib/banana-image";
@@ -190,7 +190,7 @@ function buildBananaPrompt(task: DesignTask, instruction = "") {
     .join("\n");
 }
 
-function imageCreditCost(count: number) {
+export function imageCreditCost(count: number) {
   const configured = Number(process.env.BANANA_IMAGE_CREDIT_COST || "20000");
   const safe = Number.isFinite(configured) && configured > 0 ? configured : 20000;
   return BigInt(safe * Math.max(1, count));
@@ -211,6 +211,20 @@ async function findInFlightGeneration(conversationId: string, taskId: string) {
     const metadata = objectRecord(message.metadata);
     return metadata.status === "queued" || metadata.status === "processing";
   }) ?? null;
+}
+
+function generationMarkerId(conversationId: string, taskId: string, versionNumber: number) {
+  // Deterministic idempotency key (conversation + task + version) formatted as
+  // a UUID so the message primary key enforces single-flight marker creation:
+  // two concurrent dispatches compute the same id, and only one create wins.
+  const hash = createHash("sha256")
+    .update(`generation:${conversationId}:${taskId}:v${versionNumber}`)
+    .digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-${hash.slice(12, 16)}-${hash.slice(16, 20)}-${hash.slice(20, 32)}`;
+}
+
+function isUniqueViolation(error: unknown) {
+  return Boolean(error && typeof error === "object" && (error as { code?: unknown }).code === "P2002");
 }
 
 async function nextVersion(conversationId: string, taskId: string) {
@@ -253,42 +267,55 @@ export async function dispatchImageGeneration(params: DispatchParams) {
   });
   const lineage = lineageMetadata(sourceGeneration);
   const generationId = randomUUID();
+  const markerId = generationMarkerId(params.conversationId, params.task.id, versionNumber);
 
-  const generationMessage = await prisma.message.create({
-    data: {
-      conversation_id: params.conversationId,
-      role: MessageRole.assistant,
-      message_type: MessageType.generation_result,
-      design_task_id: params.task.id,
-      content: {
-        type: "image_generation",
-        status: "queued",
-        taskId: params.task.id,
-        taskType: params.task.task_type,
-        executionStrategy,
-        domain,
-        text: "已建立生成任務，準備使用 Banana 產生第一版圖像。",
-        images: [],
+  let generationMessage;
+  try {
+    generationMessage = await prisma.message.create({
+      data: {
+        id: markerId,
+        conversation_id: params.conversationId,
+        role: MessageRole.assistant,
+        message_type: MessageType.generation_result,
+        design_task_id: params.task.id,
+        content: {
+          type: "image_generation",
+          status: "queued",
+          taskId: params.task.id,
+          taskType: params.task.task_type,
+          executionStrategy,
+          domain,
+          text: "已建立生成任務，準備使用 Banana 產生第一版圖像。",
+          images: [],
+        },
+        metadata: {
+          type: "generation_result",
+          source: "conversation.generation-dispatcher",
+          generationId,
+          taskId: params.task.id,
+          taskType: params.task.task_type,
+          templateKey: params.task.template_key || params.task.task_type,
+          templateLabel: params.task.template_label || params.task.title,
+          executionStrategy,
+          status: "queued",
+          versionNumber,
+          ...lineage,
+          expectedOutputCount: Math.max(1, params.task.output_count || 1),
+          receivedOutputCount: 0,
+          pendingOutputs: Math.max(1, params.task.output_count || 1),
+          outputGroups: [],
+        } as Prisma.InputJsonValue,
       },
-      metadata: {
-        type: "generation_result",
-        source: "conversation.generation-dispatcher",
-        generationId,
-        taskId: params.task.id,
-        taskType: params.task.task_type,
-        templateKey: params.task.template_key || params.task.task_type,
-        templateLabel: params.task.template_label || params.task.title,
-        executionStrategy,
-        status: "queued",
-        versionNumber,
-        ...lineage,
-        expectedOutputCount: Math.max(1, params.task.output_count || 1),
-        receivedOutputCount: 0,
-        pendingOutputs: Math.max(1, params.task.output_count || 1),
-        outputGroups: [],
-      } as Prisma.InputJsonValue,
-    },
-  });
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      // A concurrent dispatch already created this marker — reuse it instead
+      // of queueing (and paying for) a second generation.
+      const existing = await prisma.message.findUnique({ where: { id: markerId } });
+      if (existing) return { message: existing, task: params.task, credits: BigInt(0), reused: true };
+    }
+    throw error;
+  }
   publishConversationEvent(params.conversationId, "message.created", shapeMessage(generationMessage));
   publishConversationEvent(params.conversationId, "generation.result.updated", {
     messageId: generationMessage.id,
