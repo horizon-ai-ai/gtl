@@ -24,10 +24,16 @@ function deriveDisplayName(raw: string | null | undefined): string {
 
 /**
  * Hero block with the brand tri-colour breathing gradient surface and
- * the G³ watermark, per spec gtl_ui_redesign_spec.md §4.2.
+ * the G³ watermark, per spec gtl_ui_redesign_spec.md §4.2 and Grace's
+ * 26/06/07 visual reference.
  *
- * The breathing animation cycles every 30 seconds and respects
- * prefers-reduced-motion (handled globally in globals.css).
+ * Visual contract:
+ *  - The breathing gradient is full-bleed across the section.
+ *  - The bottom edge fades into the page canvas via a mask gradient,
+ *    matching the business-owner mock where the colour halo bleeds
+ *    into the white area below rather than terminating in a card edge.
+ *  - The G³ swoosh watermark sits centre-left, sized large.
+ *  - Breathing animation respects prefers-reduced-motion (globals.css).
  */
 export function HeroBreathing({
   userName,
@@ -42,15 +48,33 @@ export function HeroBreathing({
   return (
     <section
       className={[
-        "relative overflow-hidden rounded-3xl bg-g3-breathing",
-        "px-6 py-12 sm:px-10 sm:py-16",
-        "min-h-[360px]",
+        "relative isolate w-full overflow-hidden",
+        "px-6 sm:px-10",
+        "pt-16 pb-24 sm:pt-20 sm:pb-28",
+        "min-h-[420px]",
         className ?? "",
       ].join(" ")}
     >
-      {/* Decorative G³ watermark */}
+      {/*
+        Breathing gradient layer with a bottom fade so the colour halo
+        dissolves into the page canvas instead of meeting it on a hard
+        edge. The mask lets ~75% of the gradient render at full strength
+        and feathers the remaining 25% toward transparent.
+      */}
+      <div
+        aria-hidden
+        className="bg-g3-breathing pointer-events-none absolute inset-0 -z-10"
+        style={{
+          WebkitMaskImage:
+            "linear-gradient(to bottom, black 0%, black 70%, transparent 100%)",
+          maskImage:
+            "linear-gradient(to bottom, black 0%, black 70%, transparent 100%)",
+        }}
+      />
+
+      {/* Decorative G³ swoosh — large, centre-left, layered behind text */}
       <BrandWatermark
-        className="pointer-events-none absolute inset-0 m-auto h-[80%] w-auto opacity-25"
+        className="pointer-events-none absolute left-[-4%] top-1/2 -z-10 h-[140%] w-auto -translate-y-1/2 opacity-90"
       />
 
       <div className="relative mx-auto flex max-w-3xl flex-col items-center text-center">
