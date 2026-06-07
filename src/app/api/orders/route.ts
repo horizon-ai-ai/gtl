@@ -320,22 +320,93 @@ async function buildProjectAlignmentSnapshot(params: {
   };
 }
 
+/**
+ * Map an Order row to one of the business-owner-defined service types
+ * (spec §Phase 8 — see dev spec v0.2.0):
+ *   marketing | design | trade | website | other
+ */
+function deriveServiceType(order: {
+  project_type: string | null;
+  metadata: Prisma.JsonValue;
+}): "marketing" | "design" | "trade" | "website" | "other" {
+  const meta = recordValue(order.metadata);
+  if (meta.source === "trade_inquiry") return "trade";
+  if (order.project_type === "website" || order.project_type === "product_page") return "website";
+  if (order.project_type === "design") return "design";
+  if (order.project_type === "copywriting") return "marketing";
+  return "other";
+}
+
+const SERVICE_TYPE_FILTERS: Record<string, (where: Prisma.OrderWhereInput) => Prisma.OrderWhereInput> = {
+  marketing: (w) => ({ ...w, project_type: "copywriting" }),
+  design: (w) => ({ ...w, project_type: "design" }),
+  website: (w) => ({ ...w, project_type: { in: ["website", "product_page"] } }),
+  trade: (w) => ({ ...w, metadata: { path: ["source"], equals: "trade_inquiry" } }),
+  other: (w) => ({
+    ...w,
+    AND: [
+      { OR: [{ project_type: null }, { project_type: "project" }] },
+      { NOT: { metadata: { path: ["source"], equals: "trade_inquiry" } } },
+    ],
+  }),
+};
+
 export async function GET(req: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user) return fail("UNAUTHORIZED", "Not signed in");
-    const status = req.nextUrl.searchParams.get("status") ?? undefined;
+    const params = req.nextUrl.searchParams;
+
+    const status = params.get("status") ?? undefined;
+    const service = params.get("service_type") ?? undefined;
+    const dateStart = params.get("date_start");
+    const dateEnd = params.get("date_end");
+    const quoteStart = params.get("quote_date_start");
+    const quoteEnd = params.get("quote_date_end");
+    const q = (params.get("q") ?? "").trim();
+
+    let where: Prisma.OrderWhereInput = {
+      user_id: session.user.id,
+      deleted_at: null,
+      ...(status ? { status: status as never } : {}),
+    };
+
+    if (dateStart || dateEnd) {
+      where.created_at = {
+        ...(dateStart ? { gte: new Date(dateStart) } : {}),
+        ...(dateEnd ? { lte: new Date(dateEnd) } : {}),
+      };
+    }
+    if (quoteStart || quoteEnd) {
+      where.submitted_at = {
+        ...(quoteStart ? { gte: new Date(quoteStart) } : {}),
+        ...(quoteEnd ? { lte: new Date(quoteEnd) } : {}),
+      };
+    }
+    if (q) {
+      where.OR = [
+        { order_no: { contains: q, mode: "insensitive" } },
+        { title: { contains: q, mode: "insensitive" } },
+        { items: { some: { name: { contains: q, mode: "insensitive" } } } },
+      ];
+    }
+    if (service && SERVICE_TYPE_FILTERS[service]) {
+      where = SERVICE_TYPE_FILTERS[service](where);
+    }
+
     const orders = await prisma.order.findMany({
-      where: {
-        user_id: session.user.id,
-        deleted_at: null,
-        ...(status ? { status: status as never } : {}),
-      },
+      where,
       orderBy: { created_at: "desc" },
-      include: { items: true },
+      include: { items: true, quotes: true },
       take: 100,
     });
-    return ok(orders);
+
+    const enriched = orders.map((o) => ({
+      ...o,
+      service_type: deriveServiceType({ project_type: o.project_type, metadata: o.metadata }),
+    }));
+
+    return ok(enriched);
   } catch (err) {
     return handleError(err);
   }
