@@ -33,6 +33,27 @@ type AppShellProps = {
   logoutAction: () => Promise<void>;
 };
 
+/**
+ * Map a route path to one of the three G³ brand pillars (spec §4.5).
+ * Used to set [data-accent] on <main> so module-level accent surfaces
+ * (focus rings, hover halos, etc.) can branch on the active pillar.
+ */
+function deriveAccent(pathname: string): "generate" | "growth" | "global" {
+  if (
+    pathname.startsWith("/chat") ||
+    pathname.startsWith("/generate") ||
+    pathname.startsWith("/sites")
+  )
+    return "generate";
+  if (
+    pathname.startsWith("/trade") ||
+    pathname.startsWith("/support")
+  )
+    return "global";
+  // analytics, orders, billing, settings — and the catch-all
+  return "growth";
+}
+
 // Derive a display name + initial from the user email/id.
 // Spec §4.1: avatar shows the first character of the user ID, uppercased.
 function deriveUserDisplay(userEmail: string) {
@@ -55,6 +76,7 @@ export function AppShell({
   logoutAction,
 }: AppShellProps) {
   const pathname = usePathname();
+  const accent = deriveAccent(pathname);
   const { displayName, initial } = deriveUserDisplay(userEmail);
 
   const nav = [
@@ -183,7 +205,7 @@ export function AppShell({
           </div>
         </div>
       </aside>
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col" data-accent={accent}>
         {announcements.length > 0 ? (
           <div className="shrink-0 space-y-2 border-b bg-amber-50 px-6 py-3">
             {announcements.map((announcement) => (

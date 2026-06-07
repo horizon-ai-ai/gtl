@@ -291,6 +291,37 @@ body {
     animation: brand-breathing 30s ease-in-out infinite;
   }
 
+  /* ─────────────────────────────────────────────────────────────
+   * Accent-aware surfaces (spec §4.5)
+   * Read [data-accent] on the nearest ancestor (set by AppShell on
+   * <main>) and resolve --g3-accent-* to the matching pillar's
+   * colour. The --g3- prefix avoids clobbering the project's
+   * existing --accent-* tokens (orange) used elsewhere.
+   *
+   * Consumers can use them via Tailwind arbitrary values:
+   *   text-[color:var(--g3-accent-500)]
+   *   bg-[color:var(--g3-accent-300)]
+   *   border-[color:var(--g3-accent-400)]
+   * ───────────────────────────────────────────────────────────── */
+  [data-accent="generate"] {
+    --g3-accent-300: var(--g3-generate-300);
+    --g3-accent-400: var(--g3-generate-400);
+    --g3-accent-500: var(--g3-generate-500);
+    --g3-accent-600: var(--g3-generate-600);
+  }
+  [data-accent="growth"] {
+    --g3-accent-300: var(--g3-growth-300);
+    --g3-accent-400: var(--g3-growth-400);
+    --g3-accent-500: var(--g3-growth-500);
+    --g3-accent-600: var(--g3-growth-600);
+  }
+  [data-accent="global"] {
+    --g3-accent-300: var(--g3-global-300);
+    --g3-accent-400: var(--g3-global-400);
+    --g3-accent-500: var(--g3-global-500);
+    --g3-accent-600: var(--g3-global-600);
+  }
+
   .status-dot-processing {
     animation: status-pulse 1.4s cubic-bezier(0.32, 0.72, 0, 1) infinite;
   }
