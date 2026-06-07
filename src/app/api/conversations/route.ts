@@ -1,14 +1,51 @@
+import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import { ok, handleError } from "@/lib/api";
 import { requireSessionUser } from "@/lib/conversation/api";
 
-export async function GET() {
+function intParam(value: string | null, fallback: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(Math.floor(parsed), max);
+}
+
+export async function GET(req: NextRequest) {
   try {
     const user = await requireSessionUser();
+    const searchParams = req.nextUrl.searchParams;
+    const page = intParam(searchParams.get("page"), 1, 1000);
+    const limit = intParam(searchParams.get("limit"), 100, 100);
+    const q = (searchParams.get("q") || "").trim();
     const items = await prisma.conversation.findMany({
-      where: { user_id: user.id, deleted_at: null },
-      orderBy: { last_message_at: { sort: "desc", nulls: "last" } },
-      take: 100,
+      where: {
+        user_id: user.id,
+        deleted_at: null,
+        ...(q
+          ? {
+              OR: [
+                { title: { contains: q, mode: "insensitive" } },
+                {
+                  messages: {
+                    some: {
+                      content: {
+                        path: ["text"],
+                        string_contains: q,
+                        mode: "insensitive",
+                      },
+                    },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [
+        { pinned: "desc" },
+        { last_message_at: { sort: "desc", nulls: "last" } },
+        { updated_at: "desc" },
+      ],
+      skip: (page - 1) * limit,
+      take: limit,
       select: {
         id: true,
         title: true,

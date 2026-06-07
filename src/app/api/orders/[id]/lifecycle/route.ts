@@ -18,7 +18,7 @@
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import type { OrderStatus, Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ok, fail, handleError, ApiError } from "@/lib/api";
@@ -29,7 +29,7 @@ const advanceSchema = z.object({
 });
 
 // status promotions tied to lifecycle stages
-const STAGE_TO_STATUS: Partial<Record<TradeStage["key"], string>> = {
+const STAGE_TO_STATUS: Partial<Record<TradeStage["key"], OrderStatus>> = {
   order_confirmed: "in_execution",
   shipped: "shipped",
   stocked_inbound: "completed",

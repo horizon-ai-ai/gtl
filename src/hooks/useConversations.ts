@@ -413,6 +413,9 @@ export function useConversations(activeConversationId?: string | null) {
     const data = await apiJson<Conversation[]>("/api/conversations");
     const normalized = data.map(normalizeConversation);
     setConversations(normalized);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("gtl:conversations-refresh"));
+    }
     return normalized;
   }, []);
 

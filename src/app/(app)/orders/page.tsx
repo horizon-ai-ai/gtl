@@ -191,7 +191,7 @@ export default function OrdersPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl p-8 pb-14">
+      <div className="mx-auto max-w-7xl px-6 py-8 pb-14 lg:px-8">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">訂單列表</h1>
@@ -208,55 +208,55 @@ export default function OrdersPage() {
 
         {/* Filter bar */}
         <Card className="mb-6 rounded-2xl p-5">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-5 lg:grid-cols-12 lg:items-start">
             {/* Date range */}
-            <div>
-              <label className="text-xs font-medium text-stone-600 flex items-center gap-1.5 mb-1.5">
+            <div className="min-w-0 lg:col-span-4">
+              <label className="mb-2 flex items-center gap-1.5 text-xs font-medium text-stone-600">
                 <CalendarRange className="h-3.5 w-3.5" /> 日期範圍
               </label>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] w-14 text-stone-500">訂單</span>
+              <div className="space-y-2">
+                <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                  <span className="text-xs text-stone-500">訂單</span>
                   <Input
                     type="date"
                     value={draft.date_start}
                     onChange={(e) => setDraft((d) => ({ ...d, date_start: e.target.value }))}
-                    className="h-8 text-xs"
+                    className="h-10 min-w-0 text-sm"
                   />
                   <span className="text-stone-400">~</span>
                   <Input
                     type="date"
                     value={draft.date_end}
                     onChange={(e) => setDraft((d) => ({ ...d, date_end: e.target.value }))}
-                    className="h-8 text-xs"
+                    className="h-10 min-w-0 text-sm"
                   />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] w-14 text-stone-500">報價</span>
+                <div className="grid grid-cols-[2.25rem_minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                  <span className="text-xs text-stone-500">報價</span>
                   <Input
                     type="date"
                     value={draft.quote_date_start}
                     onChange={(e) => setDraft((d) => ({ ...d, quote_date_start: e.target.value }))}
-                    className="h-8 text-xs"
+                    className="h-10 min-w-0 text-sm"
                   />
                   <span className="text-stone-400">~</span>
                   <Input
                     type="date"
                     value={draft.quote_date_end}
                     onChange={(e) => setDraft((d) => ({ ...d, quote_date_end: e.target.value }))}
-                    className="h-8 text-xs"
+                    className="h-10 min-w-0 text-sm"
                   />
                 </div>
               </div>
             </div>
 
             {/* Status */}
-            <div>
-              <label className="text-xs font-medium text-stone-600 mb-1.5 block">訂單狀態</label>
+            <div className="min-w-0 lg:col-span-3">
+              <label className="mb-2 block text-xs font-medium text-stone-600">訂單狀態</label>
               <select
                 value={draft.status}
                 onChange={(e) => setDraft((d) => ({ ...d, status: e.target.value }))}
-                className="w-full h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none"
               >
                 <option value="">全部狀態</option>
                 {STATUSES.map((s) => (
@@ -268,12 +268,12 @@ export default function OrdersPage() {
             </div>
 
             {/* Service type */}
-            <div>
-              <label className="text-xs font-medium text-stone-600 mb-1.5 block">服務類型</label>
+            <div className="min-w-0 lg:col-span-3">
+              <label className="mb-2 block text-xs font-medium text-stone-600">服務類型</label>
               <select
                 value={draft.service_type}
                 onChange={(e) => setDraft((d) => ({ ...d, service_type: e.target.value }))}
-                className="w-full h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none"
               >
                 <option value="">全部類型</option>
                 {SERVICE_TYPES.map((s) => (
@@ -285,12 +285,12 @@ export default function OrdersPage() {
             </div>
 
             {/* File filter */}
-            <div>
-              <label className="text-xs font-medium text-stone-600 mb-1.5 block">檔案</label>
+            <div className="min-w-0 lg:col-span-2">
+              <label className="mb-2 block text-xs font-medium text-stone-600">檔案</label>
               <select
                 value={draft.file_filter}
                 onChange={(e) => setDraft((d) => ({ ...d, file_filter: e.target.value as Filters["file_filter"] }))}
-                className="w-full h-9 rounded-md border border-stone-200 bg-white px-2 text-sm"
+                className="h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm text-stone-800 outline-none"
               >
                 <option value="">全部</option>
                 <option value="quotation">報價已上傳</option>
@@ -301,8 +301,8 @@ export default function OrdersPage() {
           </div>
 
           {/* Keyword search */}
-          <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center">
-            <label className="text-xs font-medium text-stone-600 md:w-40 shrink-0">
+          <div className="mt-5 grid gap-2 lg:grid-cols-[16rem_minmax(0,1fr)_auto] lg:items-center">
+            <label className="text-xs font-medium text-stone-600">
               關鍵字或訂單編號搜尋
             </label>
             <div className="relative flex-1">
@@ -312,10 +312,10 @@ export default function OrdersPage() {
                 onChange={(e) => setDraft((d) => ({ ...d, q: e.target.value }))}
                 onKeyDown={(e) => e.key === "Enter" && applyFilters()}
                 placeholder="例如：無印良品 / G20260101"
-                className="h-9 pl-9 text-sm"
+                className="h-10 pl-9 text-sm"
               />
             </div>
-            <Button size="sm" onClick={applyFilters} className="bg-g3-brand text-white border-0 hover:opacity-90">
+            <Button size="sm" onClick={applyFilters} className="h-10 bg-g3-brand px-5 text-white border-0 hover:opacity-90">
               搜尋
             </Button>
           </div>
@@ -392,7 +392,7 @@ function OrderCard({ order }: { order: Order }) {
       </div>
 
       {/* Field grid */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs md:grid-cols-9">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs md:grid-cols-3 xl:grid-cols-9">
         <Field label="訂單日期">
           {new Date(order.created_at).toLocaleDateString("zh-TW")}
         </Field>

@@ -32,7 +32,10 @@ export default async function AdminOrdersPage({
       },
       orderBy: { created_at: "desc" },
       take: 100,
-      include: { user: { select: { email: true, display_name: true } } },
+      include: {
+        user: { select: { email: true, display_name: true } },
+        _count: { select: { messages: true } },
+      },
     }),
     prisma.order.aggregate({
       where: { deleted_at: null },
@@ -42,16 +45,23 @@ export default async function AdminOrdersPage({
   ]);
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="space-y-6 p-8">
       <div className="flex items-end justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">訂單總覽</h1>
-          <p className="text-sm text-neutral-500 mt-1">全平台訂單檢視、GMV 與異常處理入口。</p>
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-400">Admin queue</div>
+          <h1 className="mt-2 text-2xl font-semibold">訂單工作台</h1>
+          <p className="mt-1 text-sm text-neutral-500">檢視報價、執行狀態與客戶對話，不只看金額。</p>
         </div>
-        <Card className="px-4 py-3 text-sm">
-          <div className="text-neutral-500">全平台 GMV</div>
-          <div className="text-2xl font-semibold">{formatTWD(stats._sum.total ?? 0)}</div>
-        </Card>
+        <div className="grid grid-cols-2 gap-3">
+          <Card className="px-4 py-3 text-sm">
+            <div className="text-neutral-500">訂單數</div>
+            <div className="text-2xl font-semibold">{stats._count.id}</div>
+          </Card>
+          <Card className="px-4 py-3 text-sm">
+            <div className="text-neutral-500">全平台 GMV</div>
+            <div className="text-2xl font-semibold">{formatTWD(stats._sum.total ?? 0)}</div>
+          </Card>
+        </div>
       </div>
 
       <Card className="p-4">
@@ -87,7 +97,7 @@ export default async function AdminOrdersPage({
         </form>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         <table className="w-full text-sm">
           <thead className="border-b bg-neutral-50">
             <tr>
@@ -96,13 +106,14 @@ export default async function AdminOrdersPage({
               <th className="text-left p-3">客戶</th>
               <th className="text-left p-3">金額</th>
               <th className="text-left p-3">類型</th>
+              <th className="text-left p-3">對話</th>
               <th className="text-left p-3">狀態</th>
               <th className="text-left p-3">建立日</th>
             </tr>
           </thead>
           <tbody>
             {orders.map((order) => (
-              <tr key={order.id} className="border-b last:border-0">
+              <tr key={order.id} className="border-b transition-colors last:border-0 hover:bg-neutral-50/80">
                 <td className="p-3 font-mono text-xs">
                   <Link href={`/admin/orders/${order.id}`} className="hover:underline">
                     {order.order_no}
@@ -114,8 +125,21 @@ export default async function AdminOrdersPage({
                 </td>
                 <td className="p-3">{(order.customer as { name?: string }).name ?? "—"}</td>
                 <td className="p-3">{formatTWD(order.total)}</td>
-                <td className="p-3">{order.project_type ?? "commerce"}</td>
-                <td className="p-3">{order.status}</td>
+                <td className="p-3">
+                  <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-600">
+                    {order.project_type ?? "commerce"}
+                  </span>
+                </td>
+                <td className="p-3">
+                  <span className="rounded-full border bg-white px-2.5 py-1 text-xs text-neutral-600">
+                    {order._count.messages} 則
+                  </span>
+                </td>
+                <td className="p-3">
+                  <span className={`rounded-full px-2.5 py-1 text-xs ${adminStatusClass(order.status)}`}>
+                    {adminStatusLabel(order.status)}
+                  </span>
+                </td>
                 <td className="p-3 text-neutral-500">
                   {new Date(order.created_at).toLocaleDateString()}
                 </td>
@@ -126,4 +150,32 @@ export default async function AdminOrdersPage({
       </Card>
     </div>
   );
+}
+
+function adminStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    draft: "草稿",
+    quote_pending: "等候報價",
+    quoted: "已報價",
+    confirmed: "已確認",
+    in_execution: "執行中",
+    closed: "結案",
+    cancelled: "已取消",
+    canceled: "已取消",
+    pending: "待處理",
+    paid: "已付款",
+    shipped: "已出貨",
+    completed: "完成",
+    refunded: "已退款",
+  };
+  return labels[status] ?? status;
+}
+
+function adminStatusClass(status: string) {
+  if (status === "quote_pending" || status === "pending") return "bg-amber-50 text-amber-700";
+  if (status === "quoted" || status === "confirmed") return "bg-blue-50 text-blue-700";
+  if (status === "in_execution" || status === "paid" || status === "shipped") return "bg-green-50 text-green-700";
+  if (status === "closed" || status === "completed") return "bg-neutral-900 text-white";
+  if (status === "cancelled" || status === "canceled" || status === "refunded") return "bg-red-50 text-red-700";
+  return "bg-neutral-100 text-neutral-600";
 }

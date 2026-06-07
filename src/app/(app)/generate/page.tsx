@@ -3,6 +3,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
   Code2,
   Download,
   Eye,
@@ -13,6 +14,7 @@ import {
   Image as ImageIcon,
   Loader2,
   Maximize2,
+  MessageSquare,
   PanelRightOpen,
   Send,
   X,
@@ -99,6 +101,13 @@ type TextArtifactView = {
 
 type WorkspaceMode = "generation" | "text";
 
+type ConversationHistoryItem = {
+  id: string;
+  title: string | null;
+  lastMessageAt?: string | null;
+  createdAt?: string | null;
+};
+
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -113,6 +122,100 @@ function numberValue(value: unknown, fallback: number) {
 
 function quickActionsFromMetadata(metadata: Record<string, unknown>) {
   return Array.isArray(metadata.quickActions) ? (metadata.quickActions as QuickAction[]) : [];
+}
+
+function formatHistoryTime(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function ConversationHistoryMenu({
+  open,
+  items,
+  activeConversationId,
+  loading,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  items: ConversationHistoryItem[];
+  activeConversationId: string | null;
+  loading: boolean;
+  onClose: () => void;
+  onSelect: (id: string) => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-canvas/85 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="關閉歷史對話"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+      />
+      <div className="relative mx-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-line1 bg-surface shadow-lg">
+        <div className="flex items-start justify-between gap-4 border-b border-line1 px-6 py-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-400">Conversation history</div>
+            <h2 className="mt-2 font-display text-2xl font-medium text-ink-900">歷史對話</h2>
+            <p className="mt-1 text-sm text-ink-500">選一筆對話後，會回到同一個對話工作區繼續操作。</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-400 transition hover:bg-hover hover:text-ink-900"
+            aria-label="關閉"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {loading && items.length === 0 ? (
+            <div className="grid gap-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-16 animate-pulse rounded-xl bg-sunken" />
+              ))}
+            </div>
+          ) : items.length > 0 ? (
+            <div className="grid gap-2">
+              {items.map((item) => {
+                const active = item.id === activeConversationId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      onSelect(item.id);
+                      onClose();
+                    }}
+                    className={[
+                      "flex w-full items-center gap-4 rounded-xl px-4 py-3 text-left transition duration-120 ease-smooth hover:bg-hover",
+                      active ? "bg-brand-50 text-brand-700" : "text-ink-700",
+                    ].join(" ")}
+                  >
+                    <span className={active ? "h-2.5 w-2.5 shrink-0 rounded-full bg-brand-500" : "h-2.5 w-2.5 shrink-0 rounded-full bg-ink-300"} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{item.title || "新對話"}</span>
+                      <span className="mt-1 block text-xs text-ink-400">{formatHistoryTime(item.lastMessageAt || item.createdAt)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-ink-400">還沒有歷史對話</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function imageItemsFromMessage(message: ChatMessage) {
@@ -865,6 +968,7 @@ export default function GeneratePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeConversationId = searchParams.get("conversationId");
+  const historyRequested = searchParams.get("history") === "1";
   const [input, setInput] = useState("");
   const [selectedModel, setSelectedModel] = useState("");
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickAction | null>(null);
@@ -877,6 +981,9 @@ export default function GeneratePage() {
   const [resultPanelWidth, setResultPanelWidth] = useState(560);
   const [chatScrollSignal, setChatScrollSignal] = useState(0);
   const [isCreatingProjectOrder, setIsCreatingProjectOrder] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<ConversationHistoryItem[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const submitLockRef = useRef(false);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
@@ -919,6 +1026,7 @@ export default function GeneratePage() {
   const hasMessages = messages.length > 0;
   const busy = isSending || isSubmitting;
   const showChatShell = hasMessages || busy;
+  const conversationTitle = activeConversation?.title || (activeConversationId ? "未命名對話" : "新對話");
   const generationResults = useMemo(
     () =>
       messages
@@ -1060,6 +1168,19 @@ export default function GeneratePage() {
     setUsage(payload ?? null);
   }, []);
 
+  const loadHistory = useCallback(async () => {
+    setIsHistoryLoading(true);
+    try {
+      const res = await fetch("/api/conversations?page=1&limit=40", { cache: "no-store" });
+      const json = (await res.json().catch(() => ({}))) as { data?: ConversationHistoryItem[] };
+      setHistoryItems(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setHistoryItems([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, []);
+
   const withSubmitLock = useCallback(
     async (work: () => Promise<void>) => {
       if (submitLockRef.current) return;
@@ -1079,6 +1200,25 @@ export default function GeneratePage() {
   useEffect(() => {
     void refreshUsage();
   }, [refreshUsage]);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [activeConversationId, loadHistory]);
+
+  useEffect(() => {
+    const onRefresh = () => void loadHistory();
+    window.addEventListener("gtl:conversations-refresh", onRefresh);
+    return () => window.removeEventListener("gtl:conversations-refresh", onRefresh);
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (historyRequested) setHistoryOpen(true);
+  }, [historyRequested]);
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    router.replace(activeConversationId ? `/generate?conversationId=${activeConversationId}` : "/generate");
+  }, [activeConversationId, router]);
 
   useEffect(() => {
     const latest = generationResults[0];
@@ -1241,6 +1381,33 @@ export default function GeneratePage() {
       <section className="relative flex min-h-0 flex-1 flex-col">
         {showChatShell ? (
           <>
+            <div className="relative z-20 shrink-0 px-4 pt-4">
+              <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryOpen((open) => !open)}
+                    className="inline-flex max-w-[min(520px,calc(100vw-180px))] items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-ink-800 transition duration-120 ease-smooth hover:bg-hover"
+                    aria-expanded={historyOpen}
+                    aria-haspopup="dialog"
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-ink-500" />
+                    <span className="truncate">{conversationTitle}</span>
+                    <ChevronDown className={["h-4 w-4 shrink-0 text-ink-400 transition-transform duration-120", historyOpen ? "rotate-180" : ""].join(" ")} />
+                  </button>
+                  <ConversationHistoryMenu
+                    open={historyOpen}
+                    items={historyItems}
+                    activeConversationId={activeConversationId}
+                    loading={isHistoryLoading}
+                    onClose={closeHistory}
+                    onSelect={(id) => {
+                      router.push(`/generate?conversationId=${id}`);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
             <div className="relative flex min-h-0 flex-1 overflow-hidden px-3 pt-3 md:px-4 md:pt-4">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {(generationResults.length > 0 || textArtifacts.length > 0) && !isResultPanelOpen ? (
@@ -1353,10 +1520,12 @@ export default function GeneratePage() {
         ) : (
           <div className="scrollbar-none min-h-0 flex-1 overflow-auto pb-10">
             {/* Status row (constrained to max content width) */}
-            <div className="mx-auto mb-2 flex min-h-5 w-full max-w-3xl items-center justify-end gap-3 px-5 pt-6">
-              {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
-              {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
-            </div>
+            {isLoadingMessages || error ? (
+              <div className="mx-auto flex min-h-5 w-full max-w-3xl items-center justify-end gap-3 px-5 py-2">
+                {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
+                {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
+              </div>
+            ) : null}
 
             {/* Full-bleed hero — gradient extends edge-to-edge of main, fades into canvas */}
             <HeroBreathing
@@ -1375,23 +1544,20 @@ export default function GeneratePage() {
                 requireModel
                 placeholder="描述你想做的圖、文案或網頁..."
               />
-            </HeroBreathing>
-
-            {/* Constrained content below the hero */}
-            <div className="mx-auto w-full max-w-4xl px-5">
-              {/* G³ default prompt chips (spec §4.4) — render below hero */}
               <PromptChips
                 items={visiblePromptChips}
                 onSelect={(chip) => {
                   setInput(chip.prompt);
                   inputRef.current?.focus();
                 }}
-                className="-mt-4"
+                className="mt-5"
               />
+              <CreditFooter usage={usage} error={error} />
+            </HeroBreathing>
 
+            {/* Constrained content below the hero */}
+            <div className="mx-auto w-full max-w-4xl px-5">
               <div className="mx-auto w-full max-w-3xl">
-                <CreditFooter usage={usage} error={error} />
-
                 <div className="mt-8 flex items-end justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">Start here</div>
