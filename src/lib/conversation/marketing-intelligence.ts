@@ -1,4 +1,5 @@
 import type { DesignTask } from "@prisma/client";
+import { resolvePurposeModelConfig, type ResolvedAiModel } from "@/lib/ai-model-settings";
 
 export type MarketingIntelligenceSource = {
   title: string;
@@ -78,10 +79,6 @@ function taipeiDate() {
 
 function appUrl() {
   return process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
-}
-
-function openRouterKey() {
-  return process.env.MARKETING_INTELLIGENCE_API_KEY || process.env.OPENROUTER_API_KEY || "";
 }
 
 function safeJson(value: string): Record<string, unknown> | null {
@@ -451,21 +448,26 @@ async function enrichVisualReferences(params: {
 
 async function openRouterChat(params: {
   model: string;
+  providerConfig: ResolvedAiModel["providerConfig"];
   messages: Array<{ role: "system" | "user"; content: string }>;
   temperature?: number;
   maxTokens?: number;
   extra?: Record<string, unknown>;
 }): Promise<ChatCompletionResponse> {
-  const key = openRouterKey();
-  if (!key) throw new Error("OpenRouter API key is not configured");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const key = params.providerConfig?.apiKey;
+  const baseUrl = params.providerConfig?.baseUrl;
+  if (!key || !baseUrl) throw new Error("Marketing model provider is not configured");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${key}`,
+  };
+  if (baseUrl.includes("openrouter.ai")) {
+    headers["HTTP-Referer"] = appUrl();
+    headers["X-Title"] = process.env.FLEXION_APP_TITLE || "Marketing AI Platform";
+  }
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-      "HTTP-Referer": appUrl(),
-      "X-Title": process.env.FLEXION_APP_TITLE || "Marketing AI Platform",
-    },
+    headers,
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
@@ -529,10 +531,6 @@ function parsedClassification(parsed: Record<string, unknown> | null): SearchCla
 
 export class MarketingIntelligenceService {
   private static instance: MarketingIntelligenceService;
-  private readonly routerModel = process.env.MARKETING_INTELLIGENCE_ROUTER_MODEL || "openai/gpt-4o-mini";
-  private readonly searchModel = process.env.MARKETING_INTELLIGENCE_SEARCH_MODEL || "perplexity/sonar-pro";
-  private readonly deepSearchModel =
-    process.env.MARKETING_INTELLIGENCE_DEEP_MODEL || "perplexity/sonar-deep-research";
 
   static getInstance() {
     if (!MarketingIntelligenceService.instance) {
@@ -542,7 +540,7 @@ export class MarketingIntelligenceService {
   }
 
   isAvailable() {
-    return Boolean(openRouterKey()) && process.env.MARKETING_INTELLIGENCE_ENABLED !== "false";
+    return process.env.MARKETING_INTELLIGENCE_ENABLED !== "false";
   }
 
   async maybeResearch(params: {
@@ -554,9 +552,16 @@ export class MarketingIntelligenceService {
   }): Promise<MarketingIntelligencePack | null> {
     if (!this.isAvailable()) return null;
 
+    const routerModel = await resolvePurposeModelConfig("marketing_router");
+    const searchModel = await resolvePurposeModelConfig("marketing_search");
+    const deepSearchModel = await resolvePurposeModelConfig("marketing_deep");
+    if (!params.forceSearch && !routerModel) return null;
+
     const classification = params.forceSearch
       ? this.forcedRecommendationClassification(params)
-      : await this.classify(params);
+      : routerModel
+        ? await this.classify(params, routerModel)
+        : null;
     if (!classification?.shouldSearch || !classification.primaryQuery) return null;
 
     const queries = [classification.primaryQuery, ...classification.subQueries]
@@ -564,18 +569,19 @@ export class MarketingIntelligenceService {
       .slice(0, classification.searchDepth === "deep" ? 10 : classification.searchDepth === "quick" ? 2 : 6);
     if (queries.length === 0) return null;
 
-    const model = classification.searchDepth === "deep" ? this.deepSearchModel : this.searchModel;
+    const selectedSearchModel = classification.searchDepth === "deep" ? (deepSearchModel ?? searchModel) : searchModel;
+    if (!selectedSearchModel) return null;
     const research = await this.research({
       classification,
-      model,
+      model: selectedSearchModel,
       query: queries.join("\n"),
       task: params.task,
     });
 
     return {
       provider: "openrouter",
-      model: this.routerModel,
-      searchModel: model,
+      model: routerModel?.model ?? "forced",
+      searchModel: selectedSearchModel.model,
       searchDepth: classification.searchDepth,
       freshness: classification.freshness,
       query: classification.primaryQuery,
@@ -658,9 +664,10 @@ export class MarketingIntelligenceService {
     userMessage: string;
     task: DesignTask | null;
     recentTurns: Array<{ role: "user" | "assistant"; content: string }>;
-  }) {
+  }, routerModel: ResolvedAiModel) {
     const response = await openRouterChat({
-      model: this.routerModel,
+      model: routerModel.model,
+      providerConfig: routerModel.providerConfig,
       temperature: 0,
       messages: [
         {
@@ -698,12 +705,13 @@ export class MarketingIntelligenceService {
 
   private async research(params: {
     classification: SearchClassification;
-    model: string;
+    model: ResolvedAiModel;
     query: string;
     task: DesignTask | null;
   }) {
     const response = await openRouterChat({
-      model: params.model,
+      model: params.model.model,
+      providerConfig: params.model.providerConfig,
       temperature: 0.2,
       messages: [
         {

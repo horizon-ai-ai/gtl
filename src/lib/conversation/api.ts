@@ -9,9 +9,9 @@ import {
 } from "@prisma/client";
 
 import { ApiError } from "@/lib/api";
+import { pickConversationModelsFromEnv, resolveRequestedModelConfig } from "@/lib/ai-model-settings";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { pickModel } from "@/lib/flexion";
 import {
   getSchemaByTemplateKey,
   resolveDefaultExecutionStrategy,
@@ -66,59 +66,19 @@ export function parseExecutionStrategy(value: unknown): ExecutionStrategy | null
 }
 
 export function pickConversationModels(plan = "free") {
-  const configuredModels = (process.env.CONVERSATION_MODEL_OPTIONS || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      const [id, label = id] = item.split("|").map((part) => part.trim());
-      return {
-        id,
-        value: id,
-        label,
-        provider: process.env.FLEXION_API_BASE_URL?.includes("openrouter.ai") || process.env.OPENROUTER_API_KEY
-          ? "openrouter"
-          : "openai-compatible",
-      };
-    });
-
-  if (configuredModels.length > 0) return configuredModels;
-
-  return [
-    {
-      id: pickModel({ plan, taskHint: "fast" }),
-      value: pickModel({ plan, taskHint: "fast" }),
-      label: "Fast",
-      taskHint: "fast",
-      provider: "system",
-    },
-    {
-      id: pickModel({ plan, taskHint: "normal" }),
-      value: pickModel({ plan, taskHint: "normal" }),
-      label: "Standard",
-      taskHint: "normal",
-      provider: "system",
-    },
-    {
-      id: pickModel({ plan, taskHint: "complex" }),
-      value: pickModel({ plan, taskHint: "complex" }),
-      label: "Complex",
-      taskHint: "complex",
-      provider: "system",
-    },
-  ].filter((model, index, models) => models.findIndex((item) => item.id === model.id) === index);
+  return pickConversationModelsFromEnv(plan);
 }
 
 export function resolveRequestedModel(plan: string, requestedModel?: string | null): string {
-  // Clamp-on-miss: a client-supplied model is honored only when it belongs to
-  // the plan's allowlist (the same set the conversation models endpoint
-  // exposes). Absent, unknown, or out-of-plan ids fall back to the plan
-  // default instead of being forwarded to the provider.
   const requested = typeof requestedModel === "string" ? requestedModel.trim() : "";
   if (requested && pickConversationModels(plan).some((model) => model.id === requested)) {
     return requested;
   }
-  return pickModel({ plan });
+  throw new ApiError("AI_MODEL_NOT_CONFIGURED", "AI model is not configured");
+}
+
+export async function resolveRequestedModelForProvider(plan: string, requestedModel?: string | null) {
+  return resolveRequestedModelConfig(plan, requestedModel);
 }
 
 const taskTitleByType: Record<DesignTaskType, string> = {

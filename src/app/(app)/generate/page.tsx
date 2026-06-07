@@ -898,7 +898,24 @@ export default function GeneratePage() {
   } = useConversations(activeConversationId);
 
   const modelValue = selectedModel || activeConversation?.aiModel || models[0]?.value || "";
-  const visibleStarters = useMemo(() => designTaskStarters.slice(0, 9), [designTaskStarters]);
+  const visiblePromptChips = useMemo(() => {
+    const pinnedIds = new Set(["logo", "landing", "brand-site", "social-copy", "seo", "trade-strategy"]);
+    return DEFAULT_PROMPT_CHIPS.filter((chip) => pinnedIds.has(chip.id));
+  }, []);
+  const visibleStarters = useMemo(() => {
+    const picked = new Map<string, DesignTaskStarter>();
+    const domainOrder: Array<DesignTaskStarter["domain"]> = ["image", "web", "text"];
+    for (const domain of domainOrder) {
+      for (const starter of designTaskStarters.filter((item) => item.domain === domain).slice(0, 2)) {
+        picked.set(starter.templateKey || starter.taskType, starter);
+      }
+    }
+    for (const starter of designTaskStarters) {
+      if (picked.size >= 6) break;
+      picked.set(starter.templateKey || starter.taskType, starter);
+    }
+    return Array.from(picked.values()).slice(0, 6);
+  }, [designTaskStarters]);
   const hasMessages = messages.length > 0;
   const busy = isSending || isSubmitting;
   const showChatShell = hasMessages || busy;
@@ -1283,6 +1300,7 @@ export default function GeneratePage() {
                       modelOptions={models}
                       selectedModel={modelValue}
                       onModelChange={setSelectedModel}
+                      requireModel
                     />
                     <CreditFooter usage={usage} error={error} />
                   </div>
@@ -1354,6 +1372,7 @@ export default function GeneratePage() {
                 modelOptions={models}
                 selectedModel={modelValue}
                 onModelChange={setSelectedModel}
+                requireModel
                 placeholder="描述你想做的圖、文案或網頁..."
               />
             </HeroBreathing>
@@ -1362,7 +1381,7 @@ export default function GeneratePage() {
             <div className="mx-auto w-full max-w-4xl px-5">
               {/* G³ default prompt chips (spec §4.4) — render below hero */}
               <PromptChips
-                items={DEFAULT_PROMPT_CHIPS}
+                items={visiblePromptChips}
                 onSelect={(chip) => {
                   setInput(chip.prompt);
                   inputRef.current?.focus();
@@ -1373,7 +1392,15 @@ export default function GeneratePage() {
               <div className="mx-auto w-full max-w-3xl">
                 <CreditFooter usage={usage} error={error} />
 
-                <div className="mt-8 grid gap-2 sm:grid-cols-3">
+                <div className="mt-8 flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">Start here</div>
+                    <div className="mt-1 text-sm font-semibold text-ink-900">常用任務</div>
+                  </div>
+                  <div className="text-xs text-ink-400">先選方向，也可以直接輸入需求</div>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleStarters.map((starter) => {
                     const Icon = starterIcon(starter);
                     return (

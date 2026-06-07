@@ -12,7 +12,7 @@ import {
   getTaskTitle,
   parseDesignTaskType,
   requireSessionUser,
-  resolveRequestedModel,
+  resolveRequestedModelForProvider,
   resolveTaskCreateInput,
   shapeDesignTask,
   shapeMessage,
@@ -1063,7 +1063,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           : conversation.ai_model || task?.preferred_model || "";
     // Never forward the raw client value: validate against the plan allowlist
     // and clamp to the plan default on a miss.
-    const model = resolveRequestedModel(planCode, requestedModel);
+    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
+    const model = resolvedModel.model;
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
       userMessage: text,
@@ -1170,7 +1171,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       let assembled = "";
       try {
-        for await (const evt of flexionStream({ model, messages, temperature: 0.35, stream: true })) {
+        for await (const evt of flexionStream({ model, messages, temperature: 0.35, stream: true, providerConfig: resolvedModel.providerConfig })) {
           if (evt.type === "token") {
             assembled += evt.delta;
             publishConversationEvent(params.id, "message.delta", {
@@ -1191,7 +1192,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
       } catch (error) {
         console.warn("[conversations/:id/messages] streaming failed, falling back:", error);
-        const completion = await flexionComplete({ model, messages, temperature: 0.35 });
+        const completion = await flexionComplete({ model, messages, temperature: 0.35, providerConfig: resolvedModel.providerConfig });
         assembled = completion.text;
         usage = completion.usage;
         completionModel = completion.model;
@@ -1199,7 +1200,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       assistantText = assembled;
     }
 
-    const credits = openingReply ? BigInt(0) : rawToCredits(model, usage);
+    const credits = openingReply ? BigInt(0) : rawToCredits(model, usage, resolvedModel.creditMultiplier);
     const recommendedActions = detectRecommendedActions(assistantText);
     const suggestedItems = extractSuggestedItems(assistantText);
     const generationHints = ["產生", "生成", "第一版", "brief", "草稿"];

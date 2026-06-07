@@ -24,6 +24,11 @@ export type FlexionRequest = {
   temperature?: number;
   max_tokens?: number;
   response_format?: Record<string, unknown>;
+  providerConfig?: {
+    baseUrl: string;
+    apiKey: string;
+    provider?: string;
+  };
 };
 
 export type FlexionUsage = {
@@ -49,8 +54,8 @@ const MODEL_MULTIPLIER: Record<string, number> = {
   "google/gemini-2.5-pro": 5,
 };
 
-export function rawToCredits(model: string, usage: FlexionUsage): bigint {
-  const mult = MODEL_MULTIPLIER[model] ?? 5;
+export function rawToCredits(model: string, usage: FlexionUsage, multiplier?: number): bigint {
+  const mult = multiplier ?? MODEL_MULTIPLIER[model] ?? 5;
   return BigInt((usage.input_tokens + usage.output_tokens) * mult);
 }
 
@@ -98,14 +103,16 @@ type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "done"; usage: FlexionUsage; model: string };
 
-function providerHeaders() {
+function providerHeaders(config?: FlexionRequest["providerConfig"]) {
+  const apiKey = config?.apiKey || API_KEY;
+  const baseUrl = config?.baseUrl || BASE_URL;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     "X-Tenant-Id": "marketing-ai-platform",
   };
 
-  if (BASE_URL.includes("openrouter.ai")) {
+  if (baseUrl.includes("openrouter.ai")) {
     headers["HTTP-Referer"] = APP_URL;
     headers["X-Title"] = PROVIDER_TITLE;
   }
@@ -218,13 +225,16 @@ export async function* flexionStream(req: FlexionRequest) {
     return;
   }
 
-  if (!BASE_URL || !API_KEY) throw missingProviderError();
+  const baseUrl = req.providerConfig?.baseUrl || BASE_URL;
+  const apiKey = req.providerConfig?.apiKey || API_KEY;
+  if (!baseUrl || !apiKey) throw missingProviderError();
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: providerHeaders(),
+    headers: providerHeaders(req.providerConfig),
     body: JSON.stringify({
       ...req,
+      providerConfig: undefined,
       stream: true,
       stream_options: { include_usage: true },
     }),
@@ -325,12 +335,14 @@ export async function flexionComplete(
 ): Promise<FlexionCompleteResult> {
   if (ANTHROPIC_API_KEY) return anthropicComplete(req);
 
-  if (!BASE_URL || !API_KEY) throw missingProviderError();
+  const baseUrl = req.providerConfig?.baseUrl || BASE_URL;
+  const apiKey = req.providerConfig?.apiKey || API_KEY;
+  if (!baseUrl || !apiKey) throw missingProviderError();
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: providerHeaders(),
-    body: JSON.stringify({ ...req, stream: false }),
+    headers: providerHeaders(req.providerConfig),
+    body: JSON.stringify({ ...req, providerConfig: undefined, stream: false }),
   });
 
   if (!res.ok) throw new Error(`Flexion error: ${res.status} ${await res.text()}`);

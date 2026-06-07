@@ -1,6 +1,7 @@
 import { fail, handleError, ok } from "@/lib/api";
+import { pickConversationModels } from "@/lib/ai-model-settings";
 import { prisma } from "@/lib/db";
-import { pickConversationModels, requireSessionUser } from "@/lib/conversation/api";
+import { requireSessionUser } from "@/lib/conversation/api";
 
 export async function GET() {
   try {
@@ -11,7 +12,7 @@ export async function GET() {
     });
 
     return ok({
-      models: pickConversationModels(subscription?.plan.code ?? "free"),
+      models: await pickConversationModels(subscription?.plan.code ?? "free"),
     });
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {

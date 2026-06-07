@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { DesignTaskStatus, MessageRole, MessageType } from "@prisma/client";
 
 import { ApiError, handleError, ok } from "@/lib/api";
+import { resolveRequestedModelConfig } from "@/lib/ai-model-settings";
 import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
 import { prisma } from "@/lib/db";
 import { flexionComplete, pickModel, rawToCredits } from "@/lib/flexion";
@@ -168,13 +169,15 @@ export async function POST(
       where: { user_id: user.id },
       include: { plan: true },
     });
-    const model =
+    const requestedModel =
       task.preferred_model ||
       conversation.ai_model ||
       pickModel({
         plan: subscription?.plan.code ?? "free",
         taskHint: executionStrategy === "structured_text" ? "complex" : "normal",
       });
+    const resolvedModel = await resolveRequestedModelConfig(subscription?.plan.code ?? "free", requestedModel);
+    const model = resolvedModel.model;
 
     const collected = objectValue(task.collected_data);
     const resolved = objectValue(task.resolved_requirements);
@@ -340,8 +343,9 @@ export async function POST(
       ],
       temperature: 0.7,
       max_tokens: 1800,
+      providerConfig: resolvedModel.providerConfig,
     });
-    const credits = rawToCredits(result.model, result.usage);
+    const credits = rawToCredits(result.model, result.usage, resolvedModel.creditMultiplier);
     const versionNumber = await nextGenerationVersion(params.id, task.id);
     const lineage = await generationLineage({
       conversationId: params.id,
