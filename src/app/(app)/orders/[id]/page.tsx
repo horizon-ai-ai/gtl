@@ -11,6 +11,9 @@ import { Label } from "@/components/ui/label";
 import { cleanTaskSummary, customerInputsText } from "@/lib/project-brief";
 import { formatTWD } from "@/lib/utils";
 import { buildTradeLifecycleTimeline, DEFAULT_TRADE_LIFECYCLE_RULES } from "@/lib/trade-lifecycle";
+import { deriveTradeStages } from "@/lib/trade-order-stages";
+import { TradeOrderTimeline } from "@/components/app/trade-order-timeline";
+import { useSession } from "next-auth/react";
 
 type OrderItem = {
   id?: string;
@@ -260,6 +263,7 @@ const EVENT_TYPE_LABEL: Record<string, string> = {
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { data: session } = useSession();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -521,6 +525,40 @@ export default function OrderDetailPage() {
           {error || notice}
         </div>
       )}
+
+      {/* Trade-order timeline (spec §Phase 9a) — header card with 9-stage stepper */}
+      {order && order.metadata?.source === "trade_inquiry" ? (() => {
+        const stages = deriveTradeStages({ status: order.status, metadata: order.metadata });
+        const caseNo =
+          (order.metadata?.inquiry_id as string | undefined) ?? order.order_no;
+        const supplier =
+          (order.customer?.name as string | undefined) ??
+          (order.metadata?.supplier as string | undefined) ??
+          "—";
+        // ETA = created_at + last stage day_offset (21 days) for display
+        const etaDate = new Date(
+          new Date(order.created_at).getTime() + 21 * 24 * 60 * 60 * 1000,
+        );
+        const etaDisplay = etaDate
+          .toISOString()
+          .slice(0, 10)
+          .replace(/-/g, "");
+        const role = (session?.user as { role?: string } | undefined)?.role;
+        const canAdvance =
+          role === "admin" || role === "super_admin" || session?.user?.id === order.user_id;
+        return (
+          <TradeOrderTimeline
+            orderId={order.id}
+            caseNo={caseNo}
+            supplier={supplier}
+            etaDisplay={etaDisplay}
+            stages={stages}
+            canAdvance={canAdvance}
+            inquiryId={(order.metadata?.inquiry_id as string | undefined) ?? null}
+            onAdvanced={() => void loadOrder()}
+          />
+        );
+      })() : null}
 
       {isProjectOrder ? (
         <Card>
