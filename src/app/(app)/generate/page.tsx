@@ -20,6 +20,8 @@ import {
 import AIChatInput from "@/components/ui/ai-chat-input";
 import { HeroBreathing } from "@/components/app/hero-breathing";
 import ConversationInterface from "@/components/ui/conversation-interface";
+import { PromptChips } from "@/components/ui/prompt-chips";
+import { DEFAULT_PROMPT_CHIPS } from "@/lib/chips/default-prompts";
 import { SiteRenderer } from "@/components/site-renderer";
 import { useConversations } from "@/hooks/useConversations";
 import { cleanTaskSummary } from "@/lib/project-brief";
@@ -1353,6 +1355,17 @@ export default function GeneratePage() {
                   placeholder="描述你想做的圖、文案或網頁..."
                 />
               </HeroBreathing>
+
+              {/* G³ default prompt chips (spec §4.4) — render below hero */}
+              <PromptChips
+                items={DEFAULT_PROMPT_CHIPS}
+                onSelect={(chip) => {
+                  setInput(chip.prompt);
+                  inputRef.current?.focus();
+                }}
+                className="mt-6 max-w-4xl mx-auto"
+              />
+
               <CreditFooter usage={usage} error={error} />
 
               <div className="mt-8 grid gap-2 sm:grid-cols-3">

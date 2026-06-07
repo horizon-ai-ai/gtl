@@ -226,7 +226,7 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
           type="button"
           onClick={submit}
           disabled={!canSend}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink-900 text-surface shadow-xs transition-[transform,background,box-shadow] duration-120 ease-snap hover:-translate-y-px hover:bg-ink-700 hover:shadow-sm active:scale-[0.97] disabled:cursor-not-allowed disabled:translate-y-0 disabled:scale-100 disabled:opacity-35"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-[transform,box-shadow,opacity] duration-120 ease-snap hover:-translate-y-px hover:shadow-md active:scale-[0.97] disabled:cursor-not-allowed disabled:translate-y-0 disabled:scale-100 disabled:opacity-35 bg-g3-brand"
           aria-label="送出"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
