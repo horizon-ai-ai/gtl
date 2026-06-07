@@ -36,6 +36,50 @@
   --err-500: #c4453a;
   --info-500: #2f6b4f;
 
+  /* ─────────────────────────────────────────────────────────────
+   * G³ Brand Tokens (per spec gtl_ui_redesign_spec.md v0.1.1 §2)
+   * Three pillars: Generate (設計) / Growth (行銷) / Global (貿易)
+   * ───────────────────────────────────────────────────────────── */
+  --g3-generate-50:  #f0fbf7;
+  --g3-generate-100: #dcf5ec;
+  --g3-generate-200: #b8ebda;
+  --g3-generate-300: #9be6d7; /* base — 系統化、創造、生成 */
+  --g3-generate-400: #6dd3bd;
+  --g3-generate-500: #43bfa3;
+  --g3-generate-600: #2fa389;
+  --g3-generate-700: #1f7d68;
+
+  --g3-growth-50:  #eef7ff;
+  --g3-growth-100: #d8ecff;
+  --g3-growth-200: #b5dcff;
+  --g3-growth-300: #7dc8fa; /* base — 數據、邏輯推動、行銷決策 */
+  --g3-growth-400: #52aef0;
+  --g3-growth-500: #2f93de;
+  --g3-growth-600: #1f76bd;
+  --g3-growth-700: #185a92;
+
+  --g3-global-50:  #f6f0ff;
+  --g3-global-100: #eadcff;
+  --g3-global-200: #d8c1ff;
+  --g3-global-300: #be9bf0; /* base — 智能整合、整合與連結 */
+  --g3-global-400: #a274dc;
+  --g3-global-500: #8855c2;
+  --g3-global-600: #6e3fa3;
+  --g3-global-700: #552f80;
+
+  --g3-gradient-brand: linear-gradient(
+    120deg,
+    #9be6d7 0%,
+    #7dc8fa 50%,
+    #be9bf0 100%
+  );
+  --g3-gradient-brand-soft: linear-gradient(
+    120deg,
+    rgba(155, 230, 215, 0.35) 0%,
+    rgba(125, 200, 250, 0.35) 50%,
+    rgba(190, 155, 240, 0.35) 100%
+  );
+
   --r-xs: 4px;
   --r-sm: 7px;
   --r-md: 11px;
@@ -148,6 +192,17 @@ body {
   }
 }
 
+/* G³ Hero breathing — full cycle 30s (per spec §4.2) */
+@keyframes brand-breathing {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
 @keyframes reveal-image {
   from {
     opacity: 0;
@@ -217,6 +272,23 @@ body {
 
   .animate-reveal-image {
     animation: reveal-image 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* G³ brand gradient surfaces */
+  .bg-g3-brand {
+    background-image: var(--g3-gradient-brand);
+  }
+
+  .bg-g3-brand-soft {
+    background-image: var(--g3-gradient-brand-soft);
+  }
+
+  /* Hero breathing surface — apply to a div with min-height to see the effect */
+  .bg-g3-breathing {
+    background-image: var(--g3-gradient-brand-soft);
+    background-size: 300% 300%;
+    background-position: 0% 50%;
+    animation: brand-breathing 30s ease-in-out infinite;
   }
 
   .status-dot-processing {
