@@ -15,10 +15,10 @@ import {
   Maximize2,
   PanelRightOpen,
   Send,
-  Sparkles,
   X,
 } from "lucide-react";
 import AIChatInput from "@/components/ui/ai-chat-input";
+import { HeroBreathing } from "@/components/app/hero-breathing";
 import ConversationInterface from "@/components/ui/conversation-interface";
 import { SiteRenderer } from "@/components/site-renderer";
 import { useConversations } from "@/hooks/useConversations";
@@ -1337,27 +1337,22 @@ export default function GeneratePage() {
                 {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
                 {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
               </div>
-              <div className="mx-auto mb-8 animate-rise text-center">
-                <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-sm">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <h1 className="font-display text-4xl font-medium leading-tight text-ink-900">Hello，今天想來點什麼？</h1>
-                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-ink-500">
-                  先丟一句想法就可以，我會接著收斂 Logo、文案、網頁或視覺方向。
-                </p>
-              </div>
-
-              <AIChatInput
-                ref={inputRef}
-                value={input}
-                onChange={setInput}
-                onSend={(value, files) => void handleSend(value, files)}
-                loading={busy}
-                modelOptions={models}
-                selectedModel={modelValue}
-                onModelChange={setSelectedModel}
-                placeholder="描述你想做的圖、文案或網頁..."
-              />
+              <HeroBreathing
+                subtitle="你可以問我服務內容，也可以直接告訴我想做什麼設計。"
+                className="animate-rise"
+              >
+                <AIChatInput
+                  ref={inputRef}
+                  value={input}
+                  onChange={setInput}
+                  onSend={(value, files) => void handleSend(value, files)}
+                  loading={busy}
+                  modelOptions={models}
+                  selectedModel={modelValue}
+                  onModelChange={setSelectedModel}
+                  placeholder="描述你想做的圖、文案或網頁..."
+                />
+              </HeroBreathing>
               <CreditFooter usage={usage} error={error} />
 
               <div className="mt-8 grid gap-2 sm:grid-cols-3">
