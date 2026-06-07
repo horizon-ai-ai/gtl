@@ -31,6 +31,8 @@ type ServiceType = "marketing" | "design" | "trade" | "website" | "other";
 
 type OrderItem = { id: string; name: string; quantity: number; unit_price: number; total: number };
 
+type SuggestedItem = { name: string; quantity: number; unit: string; hint?: string };
+
 type ProjectQuote = {
   id: string;
   amount: number;
@@ -50,6 +52,7 @@ type Order = {
   currency: string;
   items: OrderItem[];
   quotes?: ProjectQuote[];
+  notes?: string | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;
   submitted_at?: string | null;
@@ -377,6 +380,8 @@ function OrderCard({ order }: { order: Order }) {
   const service = SERVICE_TYPES.find((s) => s.value === order.service_type);
   const quoteUrl = quotationUrl(order);
   const itemQty = order.items.reduce((sum, it) => sum + it.quantity, 0);
+  const rawSuggested = order.metadata?.suggested_items;
+  const suggestedItems = Array.isArray(rawSuggested) ? (rawSuggested as SuggestedItem[]) : [];
 
   return (
     <Card className="rounded-2xl border-stone-200 p-5 shadow-sm">
@@ -452,6 +457,39 @@ function OrderCard({ order }: { order: Order }) {
           )}
         </Field>
       </div>
+
+      {/* Draft-order AI 建議品項 block — pre-redesign behavior restored (review #2) */}
+      {order.status === "draft" && (suggestedItems.length || order.notes) ? (
+        <div className="mt-4 rounded-md border bg-neutral-50 p-3 space-y-3">
+          {suggestedItems.length ? (
+            <div>
+              <div className="text-sm font-medium">建議品項</div>
+              <div className="mt-2 space-y-2">
+                {suggestedItems.map((item, index) => (
+                  <div
+                    key={`${item.name}-${index}`}
+                    className="flex items-start justify-between gap-3 rounded border bg-white px-3 py-2"
+                  >
+                    <div>
+                      <div className="font-medium">{item.name}</div>
+                      <div className="text-xs text-neutral-500">{item.hint ?? "請補完整品項資料"}</div>
+                    </div>
+                    <div className="text-xs text-neutral-500 whitespace-nowrap">
+                      {item.quantity} {item.unit}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {order.notes ? (
+            <div>
+              <div className="text-sm font-medium">草稿摘要</div>
+              <p className="mt-2 text-sm text-neutral-600 whitespace-pre-wrap">{order.notes}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Action row */}
       <div className="mt-5 flex flex-wrap gap-2 border-t border-stone-100 pt-4">
