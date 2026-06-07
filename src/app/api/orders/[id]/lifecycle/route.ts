@@ -6,31 +6,35 @@
  *
  * Authorisation:
  *   - admin: may advance any trade order to any later stage
- *   - order owner (seller user): may advance forward by exactly one stage
+ *   - order owner (seller user): may advance forward by exactly one stage,
+ *     and only across metadata-only stages (processing, in_transit,
+ *     arrived_warehouse) — stages with a status side-effect are admin-only
  *
  * Side effects:
  *   - Updates order.metadata.lifecycle_stage and lifecycle_stage_at
  *   - Writes an OrderEvent (type: lifecycle_advanced, actor: 'admin' | 'user',
  *     data: { from, to })
  *   - Also bumps order.status when crossing meaningful boundaries
- *     (order_confirmed -> 'in_execution', shipped -> 'shipped',
- *     stocked_inbound -> 'completed')
+ *     (order_confirmed -> 'confirmed', shipped -> 'shipped',
+ *     stocked_inbound -> 'completed'); every status change is validated by
+ *     assertProjectTransition and recorded in OrderStatusHistory atomically
  */
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import type { OrderStatus, Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ok, fail, handleError, ApiError } from "@/lib/api";
+import { assertProjectTransition, writeOrderStatusHistory } from "@/lib/project-orders";
 import { deriveTradeStages, TRADE_STAGE_KEYS, type TradeStage } from "@/lib/trade-order-stages";
 
 const advanceSchema = z.object({
   stage_key: z.enum(TRADE_STAGE_KEYS as [TradeStage["key"], ...TradeStage["key"][]]),
 });
 
-// status promotions tied to lifecycle stages
-const STAGE_TO_STATUS: Partial<Record<TradeStage["key"], string>> = {
-  order_confirmed: "in_execution",
+// status promotions tied to lifecycle stages (admin-only; validated transitions)
+const STAGE_TO_STATUS: Partial<Record<TradeStage["key"], OrderStatus>> = {
+  order_confirmed: "confirmed",
   shipped: "shipped",
   stocked_inbound: "completed",
 };
@@ -89,27 +93,56 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       );
     }
 
-    const fromStage = activeIdx >= 0 ? stages[activeIdx].key : null;
-    const newStatus = STAGE_TO_STATUS[targetKey] ?? order.status;
+    // Status-changing stages are admin-only: the deposit/quote-acceptance
+    // gate lives in accept-quote, and fulfilment milestones are admin calls.
+    const mappedStatus = STAGE_TO_STATUS[targetKey];
+    if (mappedStatus && !isAdmin) {
+      throw new ApiError(
+        "BUSINESS_RULE_VIOLATION",
+        "此階段會變更訂單狀態：訂單成立請走報價確認流程，出貨／入倉里程碑請由管理員推進",
+      );
+    }
 
-    const updated = await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        status: newStatus,
-        metadata: {
-          ...meta,
-          lifecycle_stage: targetKey,
-          lifecycle_stage_at: new Date().toISOString(),
-        } as Prisma.InputJsonValue,
-        events: {
-          create: {
-            type: "lifecycle_advanced",
-            actor: isAdmin ? "admin" : "user",
-            data: { from: fromStage, to: targetKey, by_user_id: session.user.id } as Prisma.InputJsonValue,
+    const fromStage = activeIdx >= 0 ? stages[activeIdx].key : null;
+    const newStatus = mappedStatus ?? order.status;
+    const statusChanges = newStatus !== order.status;
+    if (statusChanges) {
+      assertProjectTransition(order.status, newStatus);
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          status: newStatus,
+          metadata: {
+            ...meta,
+            lifecycle_stage: targetKey,
+            lifecycle_stage_at: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+          events: {
+            create: {
+              type: "lifecycle_advanced",
+              actor: isAdmin ? "admin" : "user",
+              data: { from: fromStage, to: targetKey, by_user_id: session.user.id } as Prisma.InputJsonValue,
+            },
           },
         },
-      },
-      include: { items: true, events: { orderBy: { created_at: "desc" }, take: 20 } },
+        include: { items: true, events: { orderBy: { created_at: "desc" }, take: 20 } },
+      });
+      if (statusChanges) {
+        await writeOrderStatusHistory(
+          {
+            orderId: order.id,
+            fromStatus: order.status,
+            toStatus: newStatus,
+            actorId: session.user.id,
+            reason: "lifecycle_advanced",
+          },
+          tx,
+        );
+      }
+      return row;
     });
 
     return ok({
