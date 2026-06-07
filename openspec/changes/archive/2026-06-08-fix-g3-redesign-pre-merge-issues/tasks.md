@@ -24,4 +24,4 @@
 ## 5. Verification and PR update
 
 - [x] 5.1 Full local verification on the PR branch: `npm run lint` and `npm run test` pass (run via bash on Windows per project convention), and the production build (`npm run build` via bash) compiles with no new errors. Verified by command exit codes and clean output.
-- [ ] 5.2 Push the fixes to `origin/feat/g3-ui-redesign` so PR #5 updates, and leave a PR comment summarizing the 7 fixes with a link to docs/20_code_review_g3_ui_redesign.md, including the design note that `order_confirmed` now maps to status `confirmed` (not `in_execution`) for the redesign author to confirm. Verified by `gh pr view 5` showing the new head commit and the comment.
+- [x] 5.2 Push the fixes to `origin/feat/g3-ui-redesign` so PR #5 updates, and leave a PR comment summarizing the 7 fixes with a link to docs/20_code_review_g3_ui_redesign.md, including the design note that `order_confirmed` now maps to status `confirmed` (not `in_execution`) for the redesign author to confirm. Verified by `gh pr view 5` showing the new head commit and the comment.
