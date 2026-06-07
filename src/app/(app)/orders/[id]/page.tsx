@@ -69,6 +69,7 @@ type StatusHistory = {
 
 type Order = {
   id: string;
+  user_id: string;
   order_no: string;
   status: string;
   project_type?: string | null;
