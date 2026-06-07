@@ -242,7 +242,7 @@ body {
   }
 
   .trade-quick-link {
-    @apply inline-flex items-center justify-between gap-3 rounded-md border border-line2 bg-surface px-4 py-3 text-sm font-medium text-ink-700 shadow-xs transition-[transform,background,border,box-shadow] duration-120 ease-smooth hover:-translate-y-px hover:border-line3 hover:bg-hover hover:text-ink-900 hover:shadow-sm;
+    @apply inline-flex items-center justify-start gap-3 rounded-2xl border border-global-100 bg-white/90 px-4 py-3 text-sm font-medium text-stone-700 shadow-sm transition-[transform,background,border,box-shadow] duration-120 ease-smooth hover:-translate-y-px hover:border-global-300 hover:bg-white hover:text-global-700 hover:shadow-md;
   }
 
   .animate-rise {

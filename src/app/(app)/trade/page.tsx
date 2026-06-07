@@ -798,24 +798,17 @@ export default function TradePage() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-8 px-6 py-8 lg:px-8">
-      <section className="overflow-hidden rounded-[28px] border border-neutral-200 bg-[radial-gradient(circle_at_top_left,_rgba(241,244,255,0.95),_rgba(255,255,255,1)_42%),linear-gradient(135deg,_#ffffff,_#f6f8fb)] shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-        <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1.4fr_0.9fr] lg:px-8 lg:py-8">
+      <section className="overflow-hidden rounded-[28px] border border-global-100 bg-[radial-gradient(circle_at_top_right,_rgba(190,155,240,0.18),_rgba(255,255,255,1)_55%),linear-gradient(135deg,_#fbf8ff,_#ffffff_60%)] shadow-[0_24px_80px_-48px_rgba(85,47,128,0.3)]">
+        <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.5fr_1fr] lg:px-8 lg:py-7">
           <div className="space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-neutral-300 bg-white/80 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-neutral-600">
+            <div
+              className="inline-flex items-center gap-2 rounded-full border border-global-200 bg-white/80 px-3 py-1 text-xs font-medium uppercase tracking-[0.2em] text-global-600"
+            >
               <Globe2 className="h-3.5 w-3.5" />
-              Trade Workspace
-            </div>
-            <div className="space-y-3">
-              <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-neutral-950 lg:text-4xl">
-                把商品、詢價、報價與貿易訂單整理成同一個工作台
-              </h1>
-              <p className="max-w-2xl text-sm leading-6 text-neutral-600 lg:text-base">
-                所有登入用戶都能在這裡瀏覽市場商品與送出詢價；升級方案並完成賣家身份審核後，才會開放商品上架、
-                Seller quotation 與賣家通知功能。
-              </p>
+              Trade Workspace · Global
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {access?.allowed ? (
                 <>
                   <Link href="/trade/orders" className="trade-quick-link">
@@ -880,21 +873,33 @@ export default function TradePage() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <div className="rounded-[22px] border border-neutral-200 bg-white/90 p-5">
-              <div className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-500">目前角色</div>
-              <div className="mt-3 flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-950 text-white">
-                  <ShieldCheck className="h-5 w-5" />
+          <div className="flex flex-col gap-3">
+            <div className="rounded-[22px] border border-global-100 bg-white/90 p-4">
+              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-500">
+                目前角色
+              </div>
+              <div className="mt-2 flex items-center gap-3">
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-xl text-white shadow-sm"
+                  style={{ backgroundImage: "var(--g3-gradient-brand)" }}
+                >
+                  <ShieldCheck className="h-4 w-4" />
                 </div>
-                <div>
-                  <div className="text-2xl font-semibold uppercase text-neutral-950">{canSell ? "seller" : "buyer"}</div>
-                  <div className="text-sm text-neutral-500">Buyer 能力預設開放；Seller 需訂閱並完成身份審核</div>
+                <div className="min-w-0">
+                  <div className="text-xl font-semibold uppercase text-stone-900">
+                    {canSell ? "seller" : "buyer"}
+                  </div>
+                  <div className="text-xs leading-snug text-stone-500">
+                    Buyer 預設開放；Seller 需訂閱 + 審核
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="rounded-[22px] border border-neutral-200 bg-neutral-950 p-5 text-white">
-              <div className="grid grid-cols-3 gap-4">
+            <div
+              className="rounded-[22px] p-4 text-white shadow-sm"
+              style={{ backgroundImage: "var(--g3-gradient-brand)" }}
+            >
+              <div className="grid grid-cols-3 gap-3">
                 <TradeMiniStat label="市場商品" value={String(marketProducts.length)} />
                 <TradeMiniStat label="我的商品" value={String(myProducts.length)} />
                 <TradeMiniStat label="待處理詢價" value={String(receivedInquiries.length)} />
