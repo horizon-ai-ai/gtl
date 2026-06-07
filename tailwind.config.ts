@@ -47,6 +47,50 @@ const config: Config = {
         info: {
           500: "var(--info-500)",
         },
+        // G³ Brand palettes (spec §2.1, §3.1)
+        generate: {
+          50: "var(--g3-generate-50)",
+          100: "var(--g3-generate-100)",
+          200: "var(--g3-generate-200)",
+          300: "var(--g3-generate-300)",
+          400: "var(--g3-generate-400)",
+          500: "var(--g3-generate-500)",
+          600: "var(--g3-generate-600)",
+          700: "var(--g3-generate-700)",
+        },
+        growth: {
+          50: "var(--g3-growth-50)",
+          100: "var(--g3-growth-100)",
+          200: "var(--g3-growth-200)",
+          300: "var(--g3-growth-300)",
+          400: "var(--g3-growth-400)",
+          500: "var(--g3-growth-500)",
+          600: "var(--g3-growth-600)",
+          700: "var(--g3-growth-700)",
+        },
+        global: {
+          50: "var(--g3-global-50)",
+          100: "var(--g3-global-100)",
+          200: "var(--g3-global-200)",
+          300: "var(--g3-global-300)",
+          400: "var(--g3-global-400)",
+          500: "var(--g3-global-500)",
+          600: "var(--g3-global-600)",
+          700: "var(--g3-global-700)",
+        },
+      },
+      backgroundImage: {
+        "g3-brand": "var(--g3-gradient-brand)",
+        "g3-brand-soft": "var(--g3-gradient-brand-soft)",
+      },
+      keyframes: {
+        "brand-breathing": {
+          "0%, 100%": { backgroundPosition: "0% 50%" },
+          "50%": { backgroundPosition: "100% 50%" },
+        },
+      },
+      animation: {
+        "brand-breathing": "brand-breathing 30s ease-in-out infinite",
       },
       borderColor: {
         DEFAULT: "var(--line-1)",

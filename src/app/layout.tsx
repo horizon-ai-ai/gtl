@@ -36,8 +36,8 @@ const notoSerifTc = Noto_Serif_TC({
 });
 
 export const metadata: Metadata = {
-  title: "Marketing AI Platform",
-  description: "對話即行銷 — 跟 AI 聊天，完成所有行銷工作",
+  title: "G³ AI — Generate · Growth · Global",
+  description: "G³ AI — 把設計、行銷、貿易整合在一段對話裡。",
 };
 
 export default function RootLayout({

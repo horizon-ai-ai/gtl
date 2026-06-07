@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Prisma } from "@prisma/client";
 import { requireAdmin } from "@/lib/auth";
@@ -29,7 +30,12 @@ async function createOrderFromQuotation(formData: FormData) {
     data: {
       user_id: inquiry.seller_id,
       order_no: generateOrderNo(),
-      status: "draft",
+      // Quotation has been finalised and admin has actively created the order
+      // -> status="quoted" so deriveTradeStages() marks stages 1–3 done and
+      // stage 4 (訂單確認) becomes the active step on the user portal
+      // (spec §Phase 9 — dev spec v0.2.0).
+      status: "quoted",
+      submitted_at: new Date(),
       customer: {
         name: inquiry.buyer.company?.name ?? inquiry.buyer.display_name ?? inquiry.buyer.email,
         email: inquiry.buyer.email,
@@ -77,6 +83,12 @@ async function createOrderFromQuotation(formData: FormData) {
     where: { id: inquiry.id },
     data: { status: "closed" },
   });
+
+  // Refresh caches the admin and the seller will land on next.
+  revalidatePath("/admin/trade/quotations");
+  revalidatePath(`/admin/orders/${order.id}`);
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${order.id}`);
 
   redirect(`/admin/orders/${order.id}`);
 }

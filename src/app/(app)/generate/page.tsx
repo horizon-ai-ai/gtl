@@ -15,11 +15,13 @@ import {
   Maximize2,
   PanelRightOpen,
   Send,
-  Sparkles,
   X,
 } from "lucide-react";
 import AIChatInput from "@/components/ui/ai-chat-input";
+import { HeroBreathing } from "@/components/app/hero-breathing";
 import ConversationInterface from "@/components/ui/conversation-interface";
+import { PromptChips } from "@/components/ui/prompt-chips";
+import { DEFAULT_PROMPT_CHIPS } from "@/lib/chips/default-prompts";
 import { SiteRenderer } from "@/components/site-renderer";
 import { useConversations } from "@/hooks/useConversations";
 import { cleanTaskSummary } from "@/lib/project-brief";
@@ -1331,22 +1333,18 @@ export default function GeneratePage() {
             </div>
           </>
         ) : (
-          <div className="scrollbar-none min-h-0 flex-1 overflow-auto px-5 py-8">
-            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center pb-10 pt-8">
-              <div className="mb-4 flex min-h-5 items-center justify-end gap-3">
-                {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
-                {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
-              </div>
-              <div className="mx-auto mb-8 animate-rise text-center">
-                <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-lg border border-brand-200 bg-brand-50 text-brand-600 shadow-sm">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <h1 className="font-display text-4xl font-medium leading-tight text-ink-900">Hello，今天想來點什麼？</h1>
-                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-ink-500">
-                  先丟一句想法就可以，我會接著收斂 Logo、文案、網頁或視覺方向。
-                </p>
-              </div>
+          <div className="scrollbar-none min-h-0 flex-1 overflow-auto pb-10">
+            {/* Status row (constrained to max content width) */}
+            <div className="mx-auto mb-2 flex min-h-5 w-full max-w-3xl items-center justify-end gap-3 px-5 pt-6">
+              {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
+              {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
+            </div>
 
+            {/* Full-bleed hero — gradient extends edge-to-edge of main, fades into canvas */}
+            <HeroBreathing
+              subtitle="你可以問我服務內容，也可以直接告訴我想做什麼設計。"
+              className="animate-rise"
+            >
               <AIChatInput
                 ref={inputRef}
                 value={input}
@@ -1358,27 +1356,43 @@ export default function GeneratePage() {
                 onModelChange={setSelectedModel}
                 placeholder="描述你想做的圖、文案或網頁..."
               />
-              <CreditFooter usage={usage} error={error} />
+            </HeroBreathing>
 
-              <div className="mt-8 grid gap-2 sm:grid-cols-3">
-                {visibleStarters.map((starter) => {
-                  const Icon = starterIcon(starter);
-                  return (
-                    <button
-                      key={`${starter.templateKey}-${starter.taskType}`}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void handleStarter(starter)}
-                      className="group animate-rise rounded-lg border border-line1 bg-surface p-4 text-left shadow-sm transition-[transform,background,border,box-shadow] duration-240 ease-smooth hover:-translate-y-0.5 hover:border-line2 hover:bg-hover hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-sunken text-ink-500 transition-[background,color] duration-120 ease-smooth group-hover:bg-accent-50 group-hover:text-accent-600">
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="text-sm font-semibold text-ink-900">{starter.label}</div>
-                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">{starter.description}</div>
-                    </button>
-                  );
-                })}
+            {/* Constrained content below the hero */}
+            <div className="mx-auto w-full max-w-4xl px-5">
+              {/* G³ default prompt chips (spec §4.4) — render below hero */}
+              <PromptChips
+                items={DEFAULT_PROMPT_CHIPS}
+                onSelect={(chip) => {
+                  setInput(chip.prompt);
+                  inputRef.current?.focus();
+                }}
+                className="-mt-4"
+              />
+
+              <div className="mx-auto w-full max-w-3xl">
+                <CreditFooter usage={usage} error={error} />
+
+                <div className="mt-8 grid gap-2 sm:grid-cols-3">
+                  {visibleStarters.map((starter) => {
+                    const Icon = starterIcon(starter);
+                    return (
+                      <button
+                        key={`${starter.templateKey}-${starter.taskType}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleStarter(starter)}
+                        className="group animate-rise rounded-lg border border-line1 bg-surface p-4 text-left shadow-sm transition-[transform,background,border,box-shadow] duration-240 ease-smooth hover:-translate-y-0.5 hover:border-line2 hover:bg-hover hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md bg-sunken text-ink-500 transition-[background,color] duration-120 ease-smooth group-hover:bg-accent-50 group-hover:text-accent-600">
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="text-sm font-semibold text-ink-900">{starter.label}</div>
+                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">{starter.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
