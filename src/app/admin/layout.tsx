@@ -13,6 +13,7 @@ import {
   LogOut,
   Sparkles,
   ChartColumn,
+  Cpu,
 } from "lucide-react";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     { href: "/admin/orders", label: "訂單", icon: Package },
     { href: "/admin/support", label: "人工支援", icon: LifeBuoy },
     { href: "/admin/copilot", label: "Admin Copilot", icon: Sparkles },
+    { href: "/admin/models", label: "AI 模型設定", icon: Cpu },
     { href: "/admin/analytics", label: "Analytics", icon: ChartColumn },
     { href: "/admin/trade", label: "Trade Ops", icon: Boxes },
     { href: "/admin/trade/profiles", label: "身份審核", icon: Boxes },
