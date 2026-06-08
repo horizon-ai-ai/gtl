@@ -866,7 +866,6 @@ export default function GeneratePage() {
   const searchParams = useSearchParams();
   const activeConversationId = searchParams.get("conversationId");
   const [input, setInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickAction | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [usage, setUsage] = useState<UsagePayload | null>(null);
@@ -884,10 +883,8 @@ export default function GeneratePage() {
   const latestTextArtifactRef = useRef<string | null>(null);
   const {
     messages,
-    activeConversation,
     activeDesignTask,
     designTaskStarters,
-    models,
     isSending,
     isLoadingMessages,
     error,
@@ -897,7 +894,6 @@ export default function GeneratePage() {
     sendMessage,
   } = useConversations(activeConversationId);
 
-  const modelValue = selectedModel || activeConversation?.aiModel || models[0]?.value || "";
   const visiblePromptChips = useMemo(() => {
     const pinnedIds = new Set(["logo", "landing", "brand-site", "social-copy", "seo", "trade-strategy"]);
     return DEFAULT_PROMPT_CHIPS.filter((chip) => pinnedIds.has(chip.id));
@@ -1124,7 +1120,7 @@ export default function GeneratePage() {
 
   async function ensureConversation(autoTitle?: string) {
     if (activeConversationId) return activeConversationId;
-    const conversation = await createConversation(autoTitle || "New Conversation", modelValue || undefined);
+    const conversation = await createConversation(autoTitle || "New Conversation");
     router.push(`/generate?conversationId=${conversation.id}`);
     return conversation.id;
   }
@@ -1140,7 +1136,6 @@ export default function GeneratePage() {
       const conversationId = await ensureConversation(content.slice(0, 32));
       await sendMessage(conversationId, {
         content,
-        selectedModel: modelValue,
         designTaskIds: activeDesignTask ? [activeDesignTask.id] : [],
         files,
         metadata: {
@@ -1173,7 +1168,6 @@ export default function GeneratePage() {
       });
       await sendMessage(conversationId, {
         content: starter.label,
-        selectedModel: modelValue,
         designTaskIds: [task.id],
         metadata: {
           source: "web",
@@ -1225,7 +1219,6 @@ export default function GeneratePage() {
       const conversationId = await ensureConversation();
       await sendMessage(conversationId, {
         content: value,
-        selectedModel: modelValue,
         designTaskIds: action.taskId ? [action.taskId] : activeDesignTask ? [activeDesignTask.id] : [],
         metadata: {
           source: "web",
@@ -1271,7 +1264,6 @@ export default function GeneratePage() {
                       const conversationId = await ensureConversation(value.slice(0, 32));
                       await sendMessage(conversationId, {
                         content: value,
-                        selectedModel: modelValue,
                         designTaskIds: activeDesignTask ? [activeDesignTask.id] : [],
                         files,
                         metadata: {
@@ -1297,10 +1289,6 @@ export default function GeneratePage() {
                       onChange={setInput}
                       onSend={(value, files) => void handleSend(value, files)}
                       loading={busy}
-                      modelOptions={models}
-                      selectedModel={modelValue}
-                      onModelChange={setSelectedModel}
-                      requireModel
                     />
                     <CreditFooter usage={usage} error={error} />
                   </div>
@@ -1369,10 +1357,6 @@ export default function GeneratePage() {
                 onChange={setInput}
                 onSend={(value, files) => void handleSend(value, files)}
                 loading={busy}
-                modelOptions={models}
-                selectedModel={modelValue}
-                onModelChange={setSelectedModel}
-                requireModel
                 placeholder="描述你想做的圖、文案或網頁..."
               />
             </HeroBreathing>

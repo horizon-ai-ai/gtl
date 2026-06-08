@@ -7,7 +7,6 @@ import type {
   ConversationMessage,
   DesignTask,
   DesignTaskStarter,
-  ModelOption,
   QuickAction,
   SendMessageResponse,
   MessageAttachment,
@@ -26,7 +25,6 @@ type SendMessageInput = {
   content: string;
   metadata?: Record<string, unknown>;
   designTaskIds?: string[];
-  selectedModel?: string;
   files?: File[];
 };
 
@@ -403,7 +401,6 @@ export function useConversations(activeConversationId?: string | null) {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeDesignTask, setActiveDesignTask] = useState<DesignTask | null>(null);
   const [designTaskStarters, setDesignTaskStarters] = useState<DesignTaskStarter[]>([]);
-  const [models, setModels] = useState<ModelOption[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -593,7 +590,6 @@ export function useConversations(activeConversationId?: string | null) {
               metadata,
               attachments,
               designTaskIds: input.designTaskIds,
-              selectedModel: input.selectedModel,
             }),
           });
 
@@ -628,17 +624,10 @@ export function useConversations(activeConversationId?: string | null) {
     return data.starters ?? [];
   }, []);
 
-  const getModels = useCallback(async () => {
-    const data = await apiJson<{ models: ModelOption[] }>("/api/conversations/models");
-    setModels(data.models ?? []);
-    return data.models ?? [];
-  }, []);
-
   useEffect(() => {
     void listConversations().catch((err) => setError(err instanceof Error ? err.message : "Failed to load conversations"));
     void getDesignTaskStarters().catch(() => undefined);
-    void getModels().catch(() => undefined);
-  }, [getDesignTaskStarters, getModels, listConversations]);
+  }, [getDesignTaskStarters, listConversations]);
 
   useEffect(() => {
     if (activeConversationId) {
@@ -702,7 +691,6 @@ export function useConversations(activeConversationId?: string | null) {
       activeConversation,
       activeDesignTask,
       designTaskStarters,
-      models,
       isSending,
       isLoadingMessages,
       error,
@@ -714,7 +702,6 @@ export function useConversations(activeConversationId?: string | null) {
       generateDesignTask,
       sendMessage,
       getDesignTaskStarters,
-      getModels,
     }),
     [
       conversations,
@@ -722,7 +709,6 @@ export function useConversations(activeConversationId?: string | null) {
       activeConversation,
       activeDesignTask,
       designTaskStarters,
-      models,
       isSending,
       isLoadingMessages,
       error,
@@ -734,7 +720,6 @@ export function useConversations(activeConversationId?: string | null) {
       generateDesignTask,
       sendMessage,
       getDesignTaskStarters,
-      getModels,
     ],
   );
 }

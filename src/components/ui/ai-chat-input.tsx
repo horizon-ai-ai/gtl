@@ -2,17 +2,12 @@
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2, Plus, Send, X } from "lucide-react";
-import type { ModelOption } from "@/types/conversation";
 
 type AIChatInputProps = {
   value: string;
   onChange: (value: string) => void;
   onSend: (value: string, files?: File[]) => void;
   loading?: boolean;
-  modelOptions?: ModelOption[];
-  selectedModel?: string;
-  onModelChange?: (value: string) => void;
-  requireModel?: boolean;
   placeholder?: string;
 };
 
@@ -68,10 +63,6 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
   onChange,
   onSend,
   loading = false,
-  modelOptions = [],
-  selectedModel = "",
-  onModelChange,
-  requireModel = false,
   placeholder = "輸入你想做的設計、文案或網頁...",
 }, ref) {
   const isComposingRef = useRef(false);
@@ -80,8 +71,7 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
   const [pastedContents, setPastedContents] = useState<PastedContent[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const sendValue = useMemo(() => mergePromptAndPastes(value, pastedContents), [pastedContents, value]);
-  const modelMissing = requireModel && modelOptions.length === 0;
-  const canSend = (Boolean(sendValue.trim()) || selectedFiles.length > 0) && !loading && !modelMissing;
+  const canSend = (Boolean(sendValue.trim()) || selectedFiles.length > 0) && !loading;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -235,26 +225,6 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
-      {onModelChange && modelOptions.length > 0 ? (
-        <div className="mt-1 flex items-center justify-between gap-2 px-3 pb-1">
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-400">Model</span>
-          <select
-            value={selectedModel}
-            onChange={(event) => onModelChange(event.target.value)}
-            className="max-w-[240px] rounded-pill border border-transparent bg-transparent px-2 py-1 text-xs text-ink-500 outline-none transition-[background,border,box-shadow] duration-120 ease-smooth hover:bg-hover focus:border-line2 focus:bg-surface focus:shadow-focus"
-          >
-            {modelOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : modelMissing ? (
-        <div className="mt-1 px-3 pb-1 text-xs text-ink-400">
-          尚未設定一般聊天模型，請先到後台新增模型。
-        </div>
-      ) : null}
     </div>
   );
 });
