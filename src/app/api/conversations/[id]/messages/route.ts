@@ -27,7 +27,7 @@ import { inferConversationIntent, type UserIntentResult } from "@/lib/conversati
 import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
-import { flexionComplete, flexionStream, pickModel, rawToCredits } from "@/lib/flexion";
+import { flexionComplete, flexionStream, pickModel, rawToCredits, type FlexionRequest } from "@/lib/flexion";
 import { handleWebsiteBuilderTurn } from "@/lib/website-builder/orchestrator";
 import { routeWebsiteKind } from "@/lib/website-builder/intent-router";
 import { saveSiteFiles } from "@/lib/site-assets";
@@ -596,6 +596,8 @@ async function createGenerationResult(params: {
   model: string;
   instruction: string;
   sourceMessageId?: string | null;
+  providerConfig?: FlexionRequest["providerConfig"];
+  creditMultiplier?: number;
 }) {
   const schema = await getSchema(params.task.task_type);
   const executionStrategy =
@@ -657,8 +659,9 @@ async function createGenerationResult(params: {
     ],
     temperature: 0.55,
     max_tokens: 1800,
+    providerConfig: params.providerConfig,
   });
-  const credits = rawToCredits(result.model, result.usage);
+  const credits = rawToCredits(result.model, result.usage, params.creditMultiplier);
 
   const [updatedTask, message] = await prisma.$transaction([
     prisma.designTask.update({
@@ -1071,7 +1074,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       recentTurns: buildRecentTurns(history),
       activeTaskType: task?.task_type ?? null,
       quickReplyAction: typeof quickReply?.action === "string" ? quickReply.action : null,
-      model: pickModel({ plan: planCode, taskHint: "fast" }),
+      model: resolvedModel.model,
+      providerConfig: resolvedModel.providerConfig,
     });
     const { context: taskContext } = await buildTaskContext(task?.id);
     const flowInstruction = buildFlowInstruction({ task, text, body });
@@ -1099,6 +1103,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         model,
         instruction: text,
         sourceMessageId: generationSourceMessageId(body),
+        providerConfig: resolvedModel.providerConfig,
+        creditMultiplier: resolvedModel.creditMultiplier,
       });
       await consumeCredits(user.id, generated.credits);
       publishConversationEvent(params.id, "message.completed", shapeMessage(generated.message));
