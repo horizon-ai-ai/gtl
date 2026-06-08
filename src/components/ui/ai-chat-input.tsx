@@ -12,6 +12,7 @@ type AIChatInputProps = {
   modelOptions?: ModelOption[];
   selectedModel?: string;
   onModelChange?: (value: string) => void;
+  requireModel?: boolean;
   placeholder?: string;
 };
 
@@ -70,6 +71,7 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
   modelOptions = [],
   selectedModel = "",
   onModelChange,
+  requireModel = false,
   placeholder = "輸入你想做的設計、文案或網頁...",
 }, ref) {
   const isComposingRef = useRef(false);
@@ -78,7 +80,8 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
   const [pastedContents, setPastedContents] = useState<PastedContent[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const sendValue = useMemo(() => mergePromptAndPastes(value, pastedContents), [pastedContents, value]);
-  const canSend = (Boolean(sendValue.trim()) || selectedFiles.length > 0) && !loading;
+  const modelMissing = requireModel && modelOptions.length === 0;
+  const canSend = (Boolean(sendValue.trim()) || selectedFiles.length > 0) && !loading && !modelMissing;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -246,6 +249,10 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
               </option>
             ))}
           </select>
+        </div>
+      ) : modelMissing ? (
+        <div className="mt-1 px-3 pb-1 text-xs text-ink-400">
+          尚未設定一般聊天模型，請先到後台新增模型。
         </div>
       ) : null}
     </div>

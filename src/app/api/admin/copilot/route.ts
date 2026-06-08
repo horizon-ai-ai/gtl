@@ -20,6 +20,9 @@ const schema = z.object({
 });
 
 async function collectModelText(messages: Array<{ role: "system" | "user"; content: string }>, taskHint: "fast" | "complex") {
+  // Still env-based — follow-up: admin/copilot has not been migrated to
+  // DB-resolved providerConfig (see fix-ai-model-resolution-review proposal
+  // Non-Goals, alongside support/ask and website-builder/orchestrator).
   const model = pickModel({ plan: "pro", taskHint });
   let text = "";
   let usage: FlexionUsage = { input_tokens: 0, output_tokens: 0 };

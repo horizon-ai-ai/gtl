@@ -12,7 +12,7 @@ import {
   getTaskTitle,
   parseDesignTaskType,
   requireSessionUser,
-  resolveRequestedModel,
+  resolveRequestedModelForProvider,
   resolveTaskCreateInput,
   shapeDesignTask,
   shapeMessage,
@@ -27,7 +27,7 @@ import { inferConversationIntent, type UserIntentResult } from "@/lib/conversati
 import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
-import { flexionComplete, flexionStream, pickModel, rawToCredits } from "@/lib/flexion";
+import { flexionComplete, flexionStream, pickModel, rawToCredits, type FlexionRequest } from "@/lib/flexion";
 import { handleWebsiteBuilderTurn } from "@/lib/website-builder/orchestrator";
 import { routeWebsiteKind } from "@/lib/website-builder/intent-router";
 import { saveSiteFiles } from "@/lib/site-assets";
@@ -596,6 +596,8 @@ async function createGenerationResult(params: {
   model: string;
   instruction: string;
   sourceMessageId?: string | null;
+  providerConfig?: FlexionRequest["providerConfig"];
+  creditMultiplier?: number;
 }) {
   const schema = await getSchema(params.task.task_type);
   const executionStrategy =
@@ -657,8 +659,9 @@ async function createGenerationResult(params: {
     ],
     temperature: 0.55,
     max_tokens: 1800,
+    providerConfig: params.providerConfig,
   });
-  const credits = rawToCredits(result.model, result.usage);
+  const credits = rawToCredits(result.model, result.usage, params.creditMultiplier);
 
   const [updatedTask, message] = await prisma.$transaction([
     prisma.designTask.update({
@@ -1063,14 +1066,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           : conversation.ai_model || task?.preferred_model || "";
     // Never forward the raw client value: validate against the plan allowlist
     // and clamp to the plan default on a miss.
-    const model = resolveRequestedModel(planCode, requestedModel);
+    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
+    const model = resolvedModel.model;
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
       userMessage: text,
       recentTurns: buildRecentTurns(history),
       activeTaskType: task?.task_type ?? null,
       quickReplyAction: typeof quickReply?.action === "string" ? quickReply.action : null,
-      model: pickModel({ plan: planCode, taskHint: "fast" }),
+      model: resolvedModel.model,
+      providerConfig: resolvedModel.providerConfig,
     });
     const { context: taskContext } = await buildTaskContext(task?.id);
     const flowInstruction = buildFlowInstruction({ task, text, body });
@@ -1098,6 +1103,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         model,
         instruction: text,
         sourceMessageId: generationSourceMessageId(body),
+        providerConfig: resolvedModel.providerConfig,
+        creditMultiplier: resolvedModel.creditMultiplier,
       });
       await consumeCredits(user.id, generated.credits);
       publishConversationEvent(params.id, "message.completed", shapeMessage(generated.message));
@@ -1170,7 +1177,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
       let assembled = "";
       try {
-        for await (const evt of flexionStream({ model, messages, temperature: 0.35, stream: true })) {
+        for await (const evt of flexionStream({ model, messages, temperature: 0.35, stream: true, providerConfig: resolvedModel.providerConfig })) {
           if (evt.type === "token") {
             assembled += evt.delta;
             publishConversationEvent(params.id, "message.delta", {
@@ -1191,7 +1198,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
       } catch (error) {
         console.warn("[conversations/:id/messages] streaming failed, falling back:", error);
-        const completion = await flexionComplete({ model, messages, temperature: 0.35 });
+        const completion = await flexionComplete({ model, messages, temperature: 0.35, providerConfig: resolvedModel.providerConfig });
         assembled = completion.text;
         usage = completion.usage;
         completionModel = completion.model;
@@ -1199,7 +1206,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       assistantText = assembled;
     }
 
-    const credits = openingReply ? BigInt(0) : rawToCredits(model, usage);
+    const credits = openingReply ? BigInt(0) : rawToCredits(model, usage, resolvedModel.creditMultiplier);
     const recommendedActions = detectRecommendedActions(assistantText);
     const suggestedItems = extractSuggestedItems(assistantText);
     const generationHints = ["產生", "生成", "第一版", "brief", "草稿"];

@@ -17,6 +17,9 @@ export async function POST(req: NextRequest) {
   const body = schema.parse(await req.json());
   const { citations, context } = await retrieveKnowledge(body.question, session.user.id);
   const { results: toolResults, context: toolContext } = await resolveSupportToolResults(session.user.id, body.question);
+  // Still env-based — follow-up: this standalone endpoint has not been migrated
+  // to DB-resolved providerConfig (see fix-ai-model-resolution-review proposal
+  // Non-Goals, alongside admin/copilot and website-builder/orchestrator).
   const model = pickModel({ plan: "pro", taskHint: "normal" });
 
   const prompt = [

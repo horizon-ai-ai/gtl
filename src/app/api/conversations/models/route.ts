@@ -1,17 +1,13 @@
 import { fail, handleError, ok } from "@/lib/api";
-import { prisma } from "@/lib/db";
-import { pickConversationModels, requireSessionUser } from "@/lib/conversation/api";
+import { pickConversationModels } from "@/lib/ai-model-settings";
+import { requireSessionUser } from "@/lib/conversation/api";
 
 export async function GET() {
   try {
-    const user = await requireSessionUser();
-    const subscription = await prisma.subscription.findUnique({
-      where: { user_id: user.id },
-      include: { plan: true },
-    });
+    await requireSessionUser();
 
     return ok({
-      models: pickConversationModels(subscription?.plan.code ?? "free"),
+      models: await pickConversationModels(),
     });
   } catch (err) {
     if (err instanceof Error && err.message === "UNAUTHORIZED") {

@@ -24,6 +24,11 @@ export type FlexionRequest = {
   temperature?: number;
   max_tokens?: number;
   response_format?: Record<string, unknown>;
+  providerConfig?: {
+    baseUrl: string;
+    apiKey: string;
+    provider?: string;
+  };
 };
 
 export type FlexionUsage = {
@@ -49,8 +54,8 @@ const MODEL_MULTIPLIER: Record<string, number> = {
   "google/gemini-2.5-pro": 5,
 };
 
-export function rawToCredits(model: string, usage: FlexionUsage): bigint {
-  const mult = MODEL_MULTIPLIER[model] ?? 5;
+export function rawToCredits(model: string, usage: FlexionUsage, multiplier?: number): bigint {
+  const mult = multiplier ?? MODEL_MULTIPLIER[model] ?? 5;
   return BigInt((usage.input_tokens + usage.output_tokens) * mult);
 }
 
@@ -98,14 +103,16 @@ type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "done"; usage: FlexionUsage; model: string };
 
-function providerHeaders() {
+function providerHeaders(config?: FlexionRequest["providerConfig"]) {
+  const apiKey = config?.apiKey || API_KEY;
+  const baseUrl = config?.baseUrl || BASE_URL;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${API_KEY}`,
+    Authorization: `Bearer ${apiKey}`,
     "X-Tenant-Id": "marketing-ai-platform",
   };
 
-  if (BASE_URL.includes("openrouter.ai")) {
+  if (baseUrl.includes("openrouter.ai")) {
     headers["HTTP-Referer"] = APP_URL;
     headers["X-Title"] = PROVIDER_TITLE;
   }
@@ -213,18 +220,23 @@ async function* anthropicStream(req: FlexionRequest): AsyncGenerator<StreamEvent
 }
 
 export async function* flexionStream(req: FlexionRequest) {
-  if (ANTHROPIC_API_KEY) {
+  // A request-supplied provider config always wins; only fall back to the
+  // ambient Anthropic env path when the caller resolved no providerConfig.
+  if (!req.providerConfig && ANTHROPIC_API_KEY) {
     yield* anthropicStream(req);
     return;
   }
 
-  if (!BASE_URL || !API_KEY) throw missingProviderError();
+  const baseUrl = req.providerConfig?.baseUrl || BASE_URL;
+  const apiKey = req.providerConfig?.apiKey || API_KEY;
+  if (!baseUrl || !apiKey) throw missingProviderError();
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: providerHeaders(),
+    headers: providerHeaders(req.providerConfig),
     body: JSON.stringify({
       ...req,
+      providerConfig: undefined,
       stream: true,
       stream_options: { include_usage: true },
     }),
@@ -323,14 +335,18 @@ async function anthropicComplete(req: FlexionRequest): Promise<FlexionCompleteRe
 export async function flexionComplete(
   req: FlexionRequest,
 ): Promise<FlexionCompleteResult> {
-  if (ANTHROPIC_API_KEY) return anthropicComplete(req);
+  // A request-supplied provider config always wins; only fall back to the
+  // ambient Anthropic env path when the caller resolved no providerConfig.
+  if (!req.providerConfig && ANTHROPIC_API_KEY) return anthropicComplete(req);
 
-  if (!BASE_URL || !API_KEY) throw missingProviderError();
+  const baseUrl = req.providerConfig?.baseUrl || BASE_URL;
+  const apiKey = req.providerConfig?.apiKey || API_KEY;
+  if (!baseUrl || !apiKey) throw missingProviderError();
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: providerHeaders(),
-    body: JSON.stringify({ ...req, stream: false }),
+    headers: providerHeaders(req.providerConfig),
+    body: JSON.stringify({ ...req, providerConfig: undefined, stream: false }),
   });
 
   if (!res.ok) throw new Error(`Flexion error: ${res.status} ${await res.text()}`);

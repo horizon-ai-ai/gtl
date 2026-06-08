@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { fail } from "@/lib/api";
+import { handleError, fail } from "@/lib/api";
 import { detectRecommendedActions, extractSuggestedItems } from "@/lib/chat-handoff";
 import { flexionStream, rawToCredits } from "@/lib/flexion";
 import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
@@ -16,7 +16,7 @@ import {
 import {
   activateDesignTask,
   getTaskTitle,
-  resolveRequestedModel,
+  resolveRequestedModelForProvider,
   resolveTaskCreateInput,
   toInputJson,
 } from "@/lib/conversation/api";
@@ -220,7 +220,11 @@ export async function POST(req: NextRequest) {
     body.preferredModel?.trim() || body.selectedModel?.trim() || body.model?.trim() || "";
   // Never forward the raw client value: validate against the plan allowlist
   // and clamp to the plan default on a miss.
-  const model = resolveRequestedModel(planCode, requestedModel || activeTask?.preferred_model);
+  const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel || activeTask?.preferred_model).catch(
+    (err) => err,
+  );
+  if (resolvedModel instanceof Error) return handleError(resolvedModel);
+  const model = resolvedModel.model;
   const taskContext = await buildDesignTaskSystemContext(activeTask);
 
   const encoder = new TextEncoder();
@@ -288,7 +292,7 @@ export async function POST(req: NextRequest) {
       let assembled = "";
       let usage = { input_tokens: 0, output_tokens: 0 };
       try {
-        for await (const evt of flexionStream({ model, messages, stream: true })) {
+        for await (const evt of flexionStream({ model, messages, stream: true, providerConfig: resolvedModel.providerConfig })) {
           if (evt.type === "token") {
             assembled += evt.delta;
             send("token", { delta: evt.delta });
@@ -300,7 +304,7 @@ export async function POST(req: NextRequest) {
         send("error", { message: (err as Error).message });
       }
 
-      const credits = rawToCredits(model, usage);
+      const credits = rawToCredits(model, usage, resolvedModel.creditMultiplier);
       const recommendedActions = detectRecommendedActions(assembled);
       const suggestedItems = extractSuggestedItems(assembled);
       await prisma.message.create({

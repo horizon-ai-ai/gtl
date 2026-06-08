@@ -443,6 +443,28 @@ model Order {
   @@index([status])
 }
 
+model AiModelSetting {
+  id                 String   @id @default(uuid()) @db.Uuid
+  label              String
+  model_id           String
+  purpose            String   @default("conversation")
+  provider           String   @default("openai-compatible")
+  base_url           String
+  api_key_ciphertext String   @db.Text
+  api_key_hint       String?
+  credit_multiplier  Int      @default(5)
+  active             Boolean  @default(true)
+  is_default         Boolean  @default(false)
+  sort_order         Int      @default(0)
+  notes              String?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@index([purpose, active, sort_order])
+  @@index([active, sort_order])
+  @@index([is_default])
+}
+
 enum OrderStatus {
   draft
   pending

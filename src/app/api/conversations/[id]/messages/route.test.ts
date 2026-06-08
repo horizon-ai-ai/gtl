@@ -139,22 +139,34 @@ jest.mock("@/lib/flexion", () => {
   };
 });
 
+// Model resolution is DB-driven (admin-managed AiModelSetting rows). Mock the
+// resolver so the route receives a deterministic model + provider config:
+// echo the requested override, falling back to "db-default" when none is given.
+const resolveRequestedModelConfigMock = jest.fn(
+  async (_plan: string, requested?: string | null) => ({
+    model: typeof requested === "string" && requested.trim() ? requested.trim() : "db-default",
+    providerConfig: {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      provider: "openai-compatible",
+    },
+    creditMultiplier: 5,
+  }),
+);
+jest.mock("@/lib/ai-model-settings", () => ({
+  resolveRequestedModelConfig: (plan: string, requested?: string | null) =>
+    resolveRequestedModelConfigMock(plan, requested),
+}));
+
 type ConversationsPost = (
   req: NextRequest,
   ctx: { params: { id: string } }
 ) => Promise<Response>;
 let POST: ConversationsPost;
-let planDefaultModel: string;
 
 beforeAll(() => {
-  delete process.env.FLEXION_MODEL;
-  delete process.env.FLEXION_API_BASE_URL;
-  delete process.env.CONVERSATION_MODEL_OPTIONS;
-  delete process.env.OPENROUTER_API_KEY;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   ({ POST } = require("./route"));
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  planDefaultModel = require("@/lib/flexion").pickModel({ plan: "free" });
 });
 
 function messageRequest(body: Record<string, unknown>) {
@@ -185,8 +197,8 @@ beforeEach(() => {
   });
 });
 
-describe("POST /api/conversations/[id]/messages — model plan gating", () => {
-  it("clamps an out-of-plan selectedModel to the plan default before the provider call", async () => {
+describe("POST /api/conversations/[id]/messages — DB-driven model resolution", () => {
+  it("forwards the resolved model and provider config to the provider", async () => {
     const res = await POST(
       messageRequest({ content: "hello", selectedModel: "claude-opus-4-7" }),
       { params: { id: "conv_1" } }
@@ -194,18 +206,22 @@ describe("POST /api/conversations/[id]/messages — model plan gating", () => {
 
     expect(res.status).toBe(200);
     expect(flexionStreamMock).toHaveBeenCalledTimes(1);
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe(planDefaultModel);
-    expect(flexionStreamMock.mock.calls[0][0].model).not.toBe("claude-opus-4-7");
+    expect(flexionStreamMock.mock.calls[0][0].model).toBe("claude-opus-4-7");
+    expect(flexionStreamMock.mock.calls[0][0].providerConfig).toEqual({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      provider: "openai-compatible",
+    });
   });
 
-  it("honors an in-plan requested model", async () => {
+  it("uses the database default when no model is requested", async () => {
     const res = await POST(
-      messageRequest({ content: "hello", selectedModel: "gemini-3.1-pro-preview" }),
+      messageRequest({ content: "hello" }),
       { params: { id: "conv_1" } }
     );
 
     expect(res.status).toBe(200);
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe("gemini-3.1-pro-preview");
+    expect(flexionStreamMock.mock.calls[0][0].model).toBe("db-default");
   });
 });
 

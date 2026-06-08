@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { ApiError } from "@/lib/api";
 
 type UsageRow = {
   user_id: string;
@@ -37,10 +38,11 @@ jest.mock("@/lib/conversation/api", () => ({
   shapeMessage: (value: unknown) => value,
 }));
 
+const resolveTaskDomainMock = jest.fn(() => "image");
 jest.mock("@/lib/conversation/schema-registry", () => ({
   getSchema: jest.fn(async () => ({ displayName: "Logo" })),
   resolveDefaultExecutionStrategy: () => "banana",
-  resolveTaskDomain: () => "image",
+  resolveTaskDomain: resolveTaskDomainMock,
 }));
 
 const dispatchImageGenerationMock = jest.fn();
@@ -53,6 +55,21 @@ jest.mock("@/lib/flexion", () => ({
   flexionComplete: jest.fn(),
   pickModel: () => "flexion-default",
   rawToCredits: () => BigInt(0),
+}));
+
+// Pre-dispatch model resolution is DB-driven; mock it so the route never
+// touches prisma raw methods (which this suite's db mock does not provide).
+const resolveRequestedModelConfigMock = jest.fn(async () => ({
+  model: "db-model",
+  providerConfig: {
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "sk-test",
+    provider: "openai-compatible",
+  },
+  creditMultiplier: 5,
+}));
+jest.mock("@/lib/ai-model-settings", () => ({
+  resolveRequestedModelConfig: resolveRequestedModelConfigMock,
 }));
 
 jest.mock("@/lib/site-builder", () => ({
@@ -154,5 +171,39 @@ describe("POST generate — cost-aware credit floor for image tasks", () => {
 
     expect(res.status).toBe(200);
     expect(dispatchImageGenerationMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST generate — text-only gate for AI_MODEL_NOT_CONFIGURED (#3)", () => {
+  it("dispatches an image task with no configured conversation model (200, not 422)", async () => {
+    // The image branch performs no model resolution: even if resolution would
+    // reject, the image task is never blocked by the text-model gate.
+    resolveRequestedModelConfigMock.mockRejectedValueOnce(
+      new ApiError("AI_MODEL_NOT_CONFIGURED", "No active conversation setting"),
+    );
+    resolveTaskDomainMock.mockReturnValueOnce("image");
+    seedUsage(BigInt(20000));
+    seedTask(1);
+
+    const res = await POST(generateRequest(), { params: { id: "conv_1", taskId: "task_1" } });
+
+    expect(res.status).toBe(200);
+    expect(dispatchImageGenerationMock).toHaveBeenCalledTimes(1);
+    expect(resolveRequestedModelConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a text-delivery task with no configured model (422 AI_MODEL_NOT_CONFIGURED)", async () => {
+    resolveRequestedModelConfigMock.mockRejectedValueOnce(
+      new ApiError("AI_MODEL_NOT_CONFIGURED", "No active conversation setting"),
+    );
+    resolveTaskDomainMock.mockReturnValueOnce("text");
+    seedUsage(BigInt(1));
+    seedTask(1);
+
+    const res = await POST(generateRequest(), { params: { id: "conv_1", taskId: "task_1" } });
+    const body = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe("AI_MODEL_NOT_CONFIGURED");
   });
 });
