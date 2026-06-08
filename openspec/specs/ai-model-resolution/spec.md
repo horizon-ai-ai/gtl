@@ -1,4 +1,4 @@
-# ai-model-plan-gating Specification
+# ai-model-resolution Specification
 
 ## Purpose
 
