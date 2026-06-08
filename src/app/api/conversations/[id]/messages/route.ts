@@ -27,7 +27,7 @@ import { inferConversationIntent, type UserIntentResult } from "@/lib/conversati
 import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
-import { flexionComplete, flexionStream, pickModel, rawToCredits, type FlexionRequest } from "@/lib/flexion";
+import { flexionComplete, flexionStream, rawToCredits, type FlexionRequest } from "@/lib/flexion";
 import { handleWebsiteBuilderTurn } from "@/lib/website-builder/orchestrator";
 import { routeWebsiteKind } from "@/lib/website-builder/intent-router";
 import { saveSiteFiles } from "@/lib/site-assets";
@@ -993,15 +993,53 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const activeTask = shouldHandleWebsiteBuilder
       ? null
       : await findConversationActiveTask(params.id, user.id);
-    const earlyIntent = shouldHandleWebsiteBuilder
+    // Resolve the conversation's provider/model once, before intent inference,
+    // so the intent classifier hits the same admin-configured endpoint as the
+    // main turn. Without a providerConfig, inferConversationIntent falls back to
+    // the ambient FLEXION_API_BASE_URL env, which 404s ("does not serve this API
+    // surface") in production. Resolutions are memoized by requested model id so
+    // the early call here (pre-task) and the later call (which may add
+    // task.preferred_model) reuse one resolution when the model is unchanged.
+    let planCodePromise: Promise<string> | null = null;
+    const getPlanCode = () => {
+      if (!planCodePromise) {
+        planCodePromise = prisma.subscription
+          .findUnique({ where: { user_id: user.id }, include: { plan: true } })
+          .then((sub) => sub?.plan.code ?? "free");
+      }
+      return planCodePromise;
+    };
+    const modelResolutions = new Map<
+      string,
+      Promise<Awaited<ReturnType<typeof resolveRequestedModelForProvider>>>
+    >();
+    const resolveConversationModel = (requested: string) => {
+      let pending = modelResolutions.get(requested);
+      if (!pending) {
+        pending = getPlanCode().then((plan) => resolveRequestedModelForProvider(plan, requested));
+        modelResolutions.set(requested, pending);
+      }
+      return pending;
+    };
+    const baseRequestedModel =
+      typeof body.selectedModel === "string" && body.selectedModel.trim()
+        ? body.selectedModel.trim()
+        : typeof body.model === "string" && body.model.trim()
+          ? body.model.trim()
+          : conversation.ai_model || "";
+    const earlyResolvedModel = shouldHandleWebsiteBuilder
       ? null
-      : await inferConversationIntent({
+      : await resolveConversationModel(baseRequestedModel);
+    const earlyIntent = earlyResolvedModel
+      ? await inferConversationIntent({
           userMessage: text,
           recentTurns: buildRecentTurns(preTaskHistory),
           activeTaskType: activeTask?.task_type ?? null,
           quickReplyAction: typeof preQuickReply?.action === "string" ? preQuickReply.action : null,
-          model: pickModel({ plan: "free", taskHint: "fast" }),
-        });
+          model: earlyResolvedModel.model,
+          providerConfig: earlyResolvedModel.providerConfig,
+        })
+      : null;
     let task = shouldHandleWebsiteBuilder
       ? null
       : await resolveRequestedTask({
@@ -1053,11 +1091,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       orderBy: { created_at: "asc" },
       take: 50,
     });
-    const sub = await prisma.subscription.findUnique({
-      where: { user_id: user.id },
-      include: { plan: true },
-    });
-    const planCode = sub?.plan.code ?? "free";
     const requestedModel =
       typeof body.selectedModel === "string" && body.selectedModel.trim()
         ? body.selectedModel.trim()
@@ -1065,8 +1098,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           ? body.model.trim()
           : conversation.ai_model || task?.preferred_model || "";
     // Never forward the raw client value: validate against the plan allowlist
-    // and clamp to the plan default on a miss.
-    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
+    // and clamp to the plan default on a miss. Memoized: reuses the pre-intent
+    // resolution when the requested model id is unchanged.
+    const resolvedModel = await resolveConversationModel(requestedModel);
     const model = resolvedModel.model;
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
