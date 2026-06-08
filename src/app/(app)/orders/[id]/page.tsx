@@ -69,6 +69,7 @@ type StatusHistory = {
 
 type Order = {
   id: string;
+  user_id: string;
   order_no: string;
   status: string;
   project_type?: string | null;
@@ -554,6 +555,7 @@ export default function OrderDetailPage() {
             etaDisplay={etaDisplay}
             stages={stages}
             canAdvance={canAdvance}
+            creatorName={order.customer?.name ?? null}
             inquiryId={(order.metadata?.inquiry_id as string | undefined) ?? null}
             onAdvanced={() => void loadOrder()}
           />

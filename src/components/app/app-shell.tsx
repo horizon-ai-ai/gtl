@@ -179,7 +179,8 @@ export function AppShell({
 
         {/* User row (spec §4.1) — avatar (first letter, growth-tinted) + display name */}
         <div className="border-t border-white/40 p-3">
-          <div className="flex items-center gap-2">
+          {/* flex-wrap: in the 72px collapsed rail the logout button wraps below the avatar instead of clipping */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <div
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white shadow-sm"
               style={{ backgroundImage: "var(--g3-gradient-brand)" }}
@@ -192,14 +193,15 @@ export function AppShell({
                 {displayName}
               </span>
             </div>
-            <form action={logoutAction} className="sidebar-expanded-only">
+            <form action={logoutAction}>
               <button
                 type="submit"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-stone-600 transition hover:bg-white/60 hover:text-stone-950"
+                className="flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-full px-2 text-stone-600 transition hover:bg-white/60 hover:text-stone-950"
                 title="登出"
                 aria-label="登出"
               >
-                <LogOut className="h-4 w-4" />
+                <LogOut className="h-4 w-4 shrink-0" />
+                <span className="sidebar-expanded-only">登出</span>
               </button>
             </form>
           </div>
