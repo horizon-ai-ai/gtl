@@ -220,7 +220,9 @@ async function* anthropicStream(req: FlexionRequest): AsyncGenerator<StreamEvent
 }
 
 export async function* flexionStream(req: FlexionRequest) {
-  if (ANTHROPIC_API_KEY) {
+  // A request-supplied provider config always wins; only fall back to the
+  // ambient Anthropic env path when the caller resolved no providerConfig.
+  if (!req.providerConfig && ANTHROPIC_API_KEY) {
     yield* anthropicStream(req);
     return;
   }
@@ -333,7 +335,9 @@ async function anthropicComplete(req: FlexionRequest): Promise<FlexionCompleteRe
 export async function flexionComplete(
   req: FlexionRequest,
 ): Promise<FlexionCompleteResult> {
-  if (ANTHROPIC_API_KEY) return anthropicComplete(req);
+  // A request-supplied provider config always wins; only fall back to the
+  // ambient Anthropic env path when the caller resolved no providerConfig.
+  if (!req.providerConfig && ANTHROPIC_API_KEY) return anthropicComplete(req);
 
   const baseUrl = req.providerConfig?.baseUrl || BASE_URL;
   const apiKey = req.providerConfig?.apiKey || API_KEY;
