@@ -17,6 +17,7 @@ The code review of the `codex/admin-model-settings-db-only` branch (full record 
 - **#8 plan-based model gating** — intentionally removed per the `ai-model-resolution` spec; not reintroduced here.
 - **#9 crypto de-duplication** (`ai-model-settings` vs `analytics/crypto`) — cleanup, deferred.
 - **#10 `openRouterChat` refactor** to reuse `flexion` headers and the sequential→parallel purpose resolves — cleanup/efficiency, deferred.
+- **Standalone LLM endpoints remain env-based** — `support/ask`, `admin/copilot`, and `website-builder/orchestrator` still resolve their model via env-only `pickModel` and are NOT migrated to DB-resolved `providerConfig` in this change; tracked as a follow-up (in-code comments mark each site).
 - No change to the encryption scheme, the admin UI, or the DB schema itself.
 
 ## Capabilities
