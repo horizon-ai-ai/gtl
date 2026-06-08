@@ -29,7 +29,7 @@
 - [x] 5.1 In `src/lib/conversation/intent-resolver.ts`, add an optional `providerConfig` to `inferConversationIntent` and thread it into its `flexionComplete` call.
 - [x] 5.2 In the messages route, pass `resolvedModel.providerConfig` to `inferConversationIntent` (replacing the env-only `pickModel`).
 - [x] 5.3 In `src/lib/site-builder.ts`, add an optional `providerConfig` to `generateSiteSchema` and pass it into the `flexionStream` call.
-- [x] 5.4 Add a short "still env-based — follow-up" note (code comment near each + one line in the proposal's Non-Goals) enumerating `support/ask`, `admin/copilot`, and `website-builder/orchestrator` as endpoints not migrated in this change.
+- [x] 5.4 Migrate the standalone LLM endpoints `src/app/api/support/ask/route.ts`, `src/app/api/admin/copilot/route.ts`, and `src/lib/website-builder/orchestrator.ts` to resolve their provider from DB settings instead of env-only `pickModel` (done in this change for full coverage, rather than deferred).
 
 ## 6. Marketing availability reflects configuration (#6)
 
@@ -44,6 +44,6 @@
 ## 8. Verification
 
 - [x] 8.1 `npm test` passes (0 failed), including the new/updated cases above.
-- [x] 8.2 `npm run typecheck` and `npm run lint` clean for the changed files (the pre-existing `orders/*` typecheck errors are out of scope and tracked separately).
+- [x] 8.2 `npm run typecheck` and `npm run lint` clean for the changed files (the only remaining typecheck errors are in `orders/*`, which are already fixed on `main` and will clear when this branch syncs with `main` — unrelated to this change).
 - [x] 8.3 Confirm **Resolved provider config is authoritative for the provider call** holds end-to-end: providerConfig wins over env (1.x), generation uses it + multiplier (2.x), intent/site-schema resolve from DB (5.x).
 - [x] 8.4 Confirm the refined **Conversation model is resolved from admin-managed database settings** holds: 422 only on text-delivery, image/web not blocked (3.x).

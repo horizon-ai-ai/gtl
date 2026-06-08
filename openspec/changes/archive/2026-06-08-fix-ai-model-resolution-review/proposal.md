@@ -8,7 +8,7 @@ The code review of the `codex/admin-model-settings-db-only` branch (full record 
 - **First-version generation uses the resolved provider + multiplier (#2).** The design-task generation path in the conversation messages route SHALL pass the resolved `providerConfig` to the provider call and the resolved `creditMultiplier` to credit accounting, matching the streamed-chat path in the same route.
 - **Model resolution is gated to text-delivery only (#3).** The `AI_MODEL_NOT_CONFIGURED` check SHALL apply only where a text model is actually used; image dispatch (Gemini/Banana) SHALL NOT require a conversation model, and the web/site path SHALL either receive the resolved `providerConfig` or be exempt from the hard gate.
 - **Schema setup leaves the request hot path (#4).** The runtime `CREATE TABLE`/`ALTER`/`CREATE INDEX` block SHALL run at most once per process (memoized), not on every resolution; the Prisma migration remains the source of truth.
-- **Sibling LLM call sites resolve from DB config (#5).** Conversation intent classification and the site-schema generator SHALL use a resolved `providerConfig` rather than env-only `pickModel`; standalone LLM endpoints that remain env-based SHALL be enumerated and migrated or explicitly documented.
+- **Sibling LLM call sites resolve from DB config (#5).** Conversation intent classification and the site-schema generator SHALL use a resolved `providerConfig` rather than env-only `pickModel`; the standalone LLM endpoints (`support/ask`, `admin/copilot`, `website-builder/orchestrator`) SHALL likewise be migrated to DB-resolved provider config.
 - **Marketing availability reflects real configuration (#6).** Marketing research SHALL NOT issue a router classification call unless a usable search model is configured.
 - **Ciphertext decode fails cleanly (#7).** `decryptModelApiKey` SHALL surface a configuration error (not a raw `SyntaxError`) on malformed `api_key_ciphertext`.
 
@@ -42,5 +42,8 @@ The code review of the `codex/admin-model-settings-db-only` branch (full record 
     - src/lib/site-builder.ts
     - src/app/api/conversations/[id]/messages/route.ts
     - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.ts
+    - src/app/api/support/ask/route.ts
+    - src/app/api/admin/copilot/route.ts
+    - src/lib/website-builder/orchestrator.ts
   - New: (none)
   - Removed: (none)

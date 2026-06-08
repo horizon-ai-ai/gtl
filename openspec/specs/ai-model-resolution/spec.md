@@ -12,7 +12,7 @@ The chat and design-task generation endpoints SHALL resolve the AI model from ac
 
 When a request carries a model override (for example `selectedModel`, `preferredModel`, or `model`), the system SHALL select the active conversation setting whose `id` or `model_id` equals the override. If the override matches no active setting, the system SHALL fall back to the active setting marked `is_default`, and otherwise to the first active setting by sort order. The provider call SHALL use the selected setting's `model_id`, decrypted API key, and base URL.
 
-When no active conversation setting exists, the system SHALL reject the request with `AI_MODEL_NOT_CONFIGURED` (HTTP 422) and SHALL NOT call the AI provider. The system SHALL NOT substitute a plan default or an environment-configured model.
+The `AI_MODEL_NOT_CONFIGURED` (HTTP 422) gate SHALL apply only to requests that actually invoke a text model: the streamed chat reply and design-task generation whose delivery is text. When no active conversation setting exists, such a request SHALL be rejected with `AI_MODEL_NOT_CONFIGURED` and SHALL NOT call the AI provider, and SHALL NOT substitute a plan default or an environment-configured model. Requests that do not consume a conversation text model — image-domain dispatch (Gemini/Banana) and site/web generation that does not depend on the conversation model — SHALL NOT be blocked by this gate.
 
 #### Scenario: Override matches a configured setting
 
@@ -24,43 +24,81 @@ When no active conversation setting exists, the system SHALL reject the request 
 - **WHEN** a user sends a chat message with an override that matches no active conversation setting
 - **THEN** the system SHALL use the default active setting (or the first active setting when none is marked default) and SHALL NOT forward the override to the provider
 
-#### Scenario: No conversation model is configured
+#### Scenario: Text request blocked when no conversation model is configured
 
-- **WHEN** a chat or design-task generation request is made while no active conversation setting exists
+- **WHEN** a chat or text-delivery design-task generation request is made while no active conversation setting exists
 - **THEN** the system SHALL return `AI_MODEL_NOT_CONFIGURED` with HTTP 422 and SHALL NOT call the AI provider
 
-##### Example: model resolution from database settings
+#### Scenario: Image and web tasks are not blocked by the text-model gate
 
-| Active settings (id, model_id, default) | Requested override | Resolved model |
-| --------------------------------------- | ------------------ | -------------- |
-| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | (none) | gpt-5.4 (default) |
-| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | s2 | claude-opus-4-7 (by id) |
-| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | claude-opus-4-7 | claude-opus-4-7 (by model_id) |
-| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | unknown-model | gpt-5.4 (default fallback) |
-| [] | anything | error: AI_MODEL_NOT_CONFIGURED (422) |
+- **WHEN** an image-domain task (dispatched to the image pipeline) or a site/web generation that does not depend on the conversation model is requested while no active conversation setting exists
+- **THEN** the system SHALL proceed with that task and SHALL NOT return `AI_MODEL_NOT_CONFIGURED`
+
 
 <!-- @trace
-source: fix-db-model-resolution-tests
+source: fix-ai-model-resolution-review
 updated: 2026-06-08
 code:
-  - docs/21_修復說明_G3改版合併前修正.pdf
-  - docs/19_修復說明_對話移植審查_表格版.pdf
-  - docs/19_修復說明_對話移植審查.md
-  - docs/22_ai_model_settings_seed_notes.md
-  - docs/19_修復說明_對話移植審查.html
-  - src/lib/conversation/api.ts
+  - src/lib/site-builder.ts
+  - src/lib/flexion.ts
+  - src/lib/website-builder/orchestrator.ts
+  - src/lib/conversation/intent-resolver.ts
+  - src/lib/conversation/marketing-intelligence.ts
+  - docs/18_code_review_conversation_port.md
+  - src/app/api/support/ask/route.ts
+  - src/app/api/admin/copilot/route.ts
+  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.ts
   - src/lib/ai-model-settings.ts
-  - docs/admin_api_extraction_pattern.md
-  - docs/19_修復說明_對話移植審查_表格版.html
-  - docs/17_spec_gap_roadmap.md
-  - docs/20_code_review_g3_ui_redesign.md
-  - docs/21_修復說明_G3改版合併前修正.html
-  - docs/19_修復說明_對話移植審查.pdf
-  - docs/21_修復說明_G3改版合併前修正.md
-  - src/app/api/conversations/models/route.ts
+  - src/app/api/conversations/[id]/messages/route.ts
 tests:
-  - src/app/api/chat/messages/route.test.ts
   - src/lib/conversation/resolve-requested-model.test.ts
-  - src/app/api/conversations/[id]/messages/route.test.ts
+  - src/lib/flexion.test.ts
+  - src/app/api/conversations/[id]/messages/route.force-generate.test.ts
   - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.test.ts
+  - src/lib/ai-model-settings.ddl.test.ts
+  - src/lib/conversation/marketing-intelligence.test.ts
+-->
+
+---
+### Requirement: Resolved provider config is authoritative for the provider call
+
+When a request has a resolved provider config (base URL, decrypted API key, model id), the provider call SHALL use it and SHALL NOT be overridden by ambient environment provider credentials (for example an Anthropic API key present in the environment). Credit accounting for the call SHALL use the resolved setting's credit multiplier rather than a static default. Every conversation-path LLM call — the streamed chat reply, first-version design-task generation, conversation intent classification, and site/web schema generation — SHALL use a provider config resolved from the active settings rather than an environment-only default.
+
+#### Scenario: Ambient Anthropic key does not override the resolved provider
+
+- **WHEN** the environment contains an Anthropic API key AND a request supplies a resolved provider config pointing at a different provider
+- **THEN** the system SHALL send the call to the resolved provider's base URL with the resolved key and model id, and SHALL NOT route it to Anthropic
+
+#### Scenario: First-version generation uses the resolved provider and multiplier
+
+- **WHEN** a design-task first-version generation runs with a resolved conversation setting
+- **THEN** the provider call SHALL use that setting's provider config and credits SHALL be charged using that setting's credit multiplier
+
+#### Scenario: Intent classification uses the resolved provider
+
+- **WHEN** conversation intent classification runs on the same request as a resolved chat model
+- **THEN** it SHALL use a provider config resolved from the active settings rather than an environment-only model
+
+<!-- @trace
+source: fix-ai-model-resolution-review
+updated: 2026-06-08
+code:
+  - src/lib/site-builder.ts
+  - src/lib/flexion.ts
+  - src/lib/website-builder/orchestrator.ts
+  - src/lib/conversation/intent-resolver.ts
+  - src/lib/conversation/marketing-intelligence.ts
+  - docs/18_code_review_conversation_port.md
+  - src/app/api/support/ask/route.ts
+  - src/app/api/admin/copilot/route.ts
+  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.ts
+  - src/lib/ai-model-settings.ts
+  - src/app/api/conversations/[id]/messages/route.ts
+tests:
+  - src/lib/conversation/resolve-requested-model.test.ts
+  - src/lib/flexion.test.ts
+  - src/app/api/conversations/[id]/messages/route.force-generate.test.ts
+  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.test.ts
+  - src/lib/ai-model-settings.ddl.test.ts
+  - src/lib/conversation/marketing-intelligence.test.ts
 -->
