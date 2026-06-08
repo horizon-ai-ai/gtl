@@ -60,7 +60,6 @@ async function createModelSetting(formData: FormData) {
   });
 
   revalidatePath("/admin/models");
-  revalidatePath("/api/conversations/models");
 }
 
 async function updateModelSetting(formData: FormData) {
@@ -101,7 +100,6 @@ async function updateModelSetting(formData: FormData) {
   });
 
   revalidatePath("/admin/models");
-  revalidatePath("/api/conversations/models");
 }
 
 export default async function AdminModelsPage() {

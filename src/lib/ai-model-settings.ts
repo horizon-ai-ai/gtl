@@ -93,17 +93,6 @@ function providerFromBaseUrl(baseUrl: string) {
   return "openai-compatible";
 }
 
-export function publicModelOption(setting: AiModelSettingRecord) {
-  return {
-    id: setting.id,
-    value: setting.id,
-    label: setting.label,
-    provider: setting.provider || providerFromBaseUrl(setting.base_url),
-    isDefault: setting.is_default,
-    modelId: setting.model_id,
-  };
-}
-
 // The Prisma migration is the source of truth for this table; this runtime
 // DDL is a defensive backstop. Memoize it with a module-level Promise so the
 // CREATE/ALTER/CREATE INDEX block runs at most once per process instead of on
@@ -268,11 +257,6 @@ export async function updateAiModelSetting(input: {
       "updated_at" = CURRENT_TIMESTAMP
     WHERE "id" = ${input.id}::uuid
   `;
-}
-
-export async function pickConversationModels() {
-  const settings = await listActiveAiModelSettings("conversation");
-  return settings.map(publicModelOption);
 }
 
 export async function resolveRequestedModelConfig(_plan: string, requestedModel?: string | null): Promise<ResolvedAiModel> {
