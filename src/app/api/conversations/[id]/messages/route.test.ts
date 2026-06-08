@@ -198,15 +198,15 @@ beforeEach(() => {
 });
 
 describe("POST /api/conversations/[id]/messages — DB-driven model resolution", () => {
-  it("forwards the resolved model and provider config to the provider", async () => {
+  it("forwards the resolved default model and provider config to the provider", async () => {
     const res = await POST(
-      messageRequest({ content: "hello", selectedModel: "claude-opus-4-7" }),
+      messageRequest({ content: "hello" }),
       { params: { id: "conv_1" } }
     );
 
     expect(res.status).toBe(200);
     expect(flexionStreamMock).toHaveBeenCalledTimes(1);
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe("claude-opus-4-7");
+    expect(flexionStreamMock.mock.calls[0][0].model).toBe("db-default");
     expect(flexionStreamMock.mock.calls[0][0].providerConfig).toEqual({
       baseUrl: "https://api.example.com/v1",
       apiKey: "sk-test",
