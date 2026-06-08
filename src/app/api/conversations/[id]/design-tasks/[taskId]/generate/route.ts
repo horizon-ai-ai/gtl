@@ -6,7 +6,7 @@ import { ApiError, handleError, ok } from "@/lib/api";
 import { resolveRequestedModelConfig } from "@/lib/ai-model-settings";
 import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
 import { prisma } from "@/lib/db";
-import { flexionComplete, pickModel, rawToCredits } from "@/lib/flexion";
+import { flexionComplete, pickModel, rawToCredits, type FlexionRequest } from "@/lib/flexion";
 import { generateSiteSchema, slugifySiteName } from "@/lib/site-builder";
 import { dispatchImageGeneration, imageCreditCost } from "@/lib/conversation/generation-dispatcher";
 import { publishConversationEvent } from "@/lib/conversation/stream";
@@ -165,19 +165,25 @@ export async function POST(
       resolveDefaultExecutionStrategy(task.task_type);
     const schema = await getSchema(task.task_type);
 
-    const subscription = await prisma.subscription.findUnique({
-      where: { user_id: user.id },
-      include: { plan: true },
-    });
-    const requestedModel =
-      task.preferred_model ||
-      conversation.ai_model ||
-      pickModel({
-        plan: subscription?.plan.code ?? "free",
-        taskHint: executionStrategy === "structured_text" ? "complex" : "normal",
+    // Resolve the conversation model lazily: only the text-delivery branch
+    // actually consumes a text model, so the image branch never resolves
+    // (and is never blocked by AI_MODEL_NOT_CONFIGURED), and the web branch
+    // resolves defensively (see below).
+    const resolveConversationModel = async () => {
+      const subscription = await prisma.subscription.findUnique({
+        where: { user_id: user.id },
+        include: { plan: true },
       });
-    const resolvedModel = await resolveRequestedModelConfig(subscription?.plan.code ?? "free", requestedModel);
-    const model = resolvedModel.model;
+      const planCode = subscription?.plan.code ?? "free";
+      const requestedModel =
+        task.preferred_model ||
+        conversation.ai_model ||
+        pickModel({
+          plan: planCode,
+          taskHint: executionStrategy === "structured_text" ? "complex" : "normal",
+        });
+      return resolveRequestedModelConfig(planCode, requestedModel);
+    };
 
     const collected = objectValue(task.collected_data);
     const resolved = objectValue(task.resolved_requirements);
@@ -201,6 +207,16 @@ export async function POST(
         ...stringArrayValue(mergedData.productImageUrls),
         ...stringArrayValue(mergedData.imageUrls),
       ].slice(0, 8);
+      // Site/web generation does not depend on the conversation text model:
+      // a missing model degrades to FALLBACK_SCHEMA rather than a 422. Resolve
+      // the provider config defensively so generateSiteSchema uses DB config
+      // when present, and swallow AI_MODEL_NOT_CONFIGURED otherwise.
+      let siteProviderConfig: FlexionRequest["providerConfig"] | undefined;
+      try {
+        siteProviderConfig = (await resolveConversationModel()).providerConfig;
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.code !== "AI_MODEL_NOT_CONFIGURED") throw err;
+      }
       const siteSchema = await generateSiteSchema({
         business_name: siteName,
         description: stringValue(mergedData, ["description", "brandDescription", "mainContent"], task.summary ?? ""),
@@ -209,6 +225,7 @@ export async function POST(
         goal: stringValue(mergedData, ["goal", "purpose"], instruction),
         product_notes: stringValue(mergedData, ["productNotes", "productInfo", "serviceInfo"], instruction),
         product_image_urls: productImageUrls,
+        providerConfig: siteProviderConfig,
       });
 
       let site:
@@ -319,6 +336,11 @@ export async function POST(
         credits: Number(dispatched.credits),
       });
     }
+    // Text delivery actually consumes a text model: resolve here so the
+    // AI_MODEL_NOT_CONFIGURED (422) gate applies only to this branch.
+    const resolvedModel = await resolveConversationModel();
+    const model = resolvedModel.model;
+
     const prompt = [
       `任務：${task.title}`,
       `任務類型：${task.task_type}`,
