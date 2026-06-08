@@ -1,5 +1,5 @@
 import type { DesignTaskType } from "@prisma/client";
-import { flexionComplete, pickModel } from "@/lib/flexion";
+import { flexionComplete, pickModel, type FlexionRequest } from "@/lib/flexion";
 
 export type UserActionIntent = "ask" | "refine" | "create_new" | "generate" | "cancel" | "chitchat";
 export type AssetFamily = "visual" | "text" | "video" | "ad_production" | null;
@@ -19,6 +19,7 @@ type InferUserIntentParams = {
   activeTaskType?: string | null;
   quickReplyAction?: string | null;
   model?: string | null;
+  providerConfig?: FlexionRequest["providerConfig"];
 };
 
 const ACTIONS: UserActionIntent[] = ["ask", "refine", "create_new", "generate", "cancel", "chitchat"];
@@ -129,6 +130,7 @@ export async function inferConversationIntent(params: InferUserIntentParams): Pr
   try {
     const result = await flexionComplete({
       model: params.model || pickModel({ plan: "free", taskHint: "fast" }),
+      providerConfig: params.providerConfig,
       messages: [
         { role: "system", content: systemPrompt() },
         {
