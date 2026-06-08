@@ -55,6 +55,20 @@ jest.mock("@/lib/flexion", () => ({
   rawToCredits: () => BigInt(0),
 }));
 
+// Pre-dispatch model resolution is DB-driven; mock it so the route never
+// touches prisma raw methods (which this suite's db mock does not provide).
+jest.mock("@/lib/ai-model-settings", () => ({
+  resolveRequestedModelConfig: jest.fn(async () => ({
+    model: "db-model",
+    providerConfig: {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      provider: "openai-compatible",
+    },
+    creditMultiplier: 5,
+  })),
+}));
+
 jest.mock("@/lib/site-builder", () => ({
   generateSiteSchema: jest.fn(),
   slugifySiteName: () => "site",

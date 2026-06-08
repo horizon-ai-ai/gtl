@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 
+import { ApiError } from "@/lib/api";
+
 type UsageRow = {
   user_id: string;
   period: string;
@@ -69,19 +71,31 @@ jest.mock("@/lib/flexion", () => {
   };
 });
 
+// Model resolution is DB-driven (admin-managed AiModelSetting rows). Mock the
+// resolver so the route receives a deterministic model + provider config:
+// echo the requested override, falling back to "db-default" when none is given.
+const resolveRequestedModelConfigMock = jest.fn(
+  async (_plan: string, requested?: string | null) => ({
+    model: typeof requested === "string" && requested.trim() ? requested.trim() : "db-default",
+    providerConfig: {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      provider: "openai-compatible",
+    },
+    creditMultiplier: 5,
+  }),
+);
+jest.mock("@/lib/ai-model-settings", () => ({
+  resolveRequestedModelConfig: (plan: string, requested?: string | null) =>
+    resolveRequestedModelConfigMock(plan, requested),
+}));
+
 type ChatPost = (req: NextRequest) => Promise<Response>;
 let POST: ChatPost;
-let planDefaultModel: string;
 
 beforeAll(() => {
-  delete process.env.FLEXION_MODEL;
-  delete process.env.FLEXION_API_BASE_URL;
-  delete process.env.CONVERSATION_MODEL_OPTIONS;
-  delete process.env.OPENROUTER_API_KEY;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   ({ POST } = require("./route"));
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  planDefaultModel = require("@/lib/flexion").pickModel({ plan: "free" });
 });
 
 function chatRequest(body: Record<string, unknown>) {
@@ -110,8 +124,8 @@ beforeEach(() => {
   });
 });
 
-describe("POST /api/chat/messages — model plan gating", () => {
-  it("clamps an out-of-plan selectedModel to the plan default before the provider call", async () => {
+describe("POST /api/chat/messages — DB-driven model resolution", () => {
+  it("forwards the resolved model and provider config to the provider", async () => {
     seedUsage(BigInt(1000));
 
     const res = await POST(
@@ -120,28 +134,33 @@ describe("POST /api/chat/messages — model plan gating", () => {
     await res.text(); // drain the SSE stream so the completion path runs
 
     expect(flexionStreamMock).toHaveBeenCalledTimes(1);
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe(planDefaultModel);
-    expect(flexionStreamMock.mock.calls[0][0].model).not.toBe("claude-opus-4-7");
+    expect(flexionStreamMock.mock.calls[0][0].model).toBe("claude-opus-4-7");
+    expect(flexionStreamMock.mock.calls[0][0].providerConfig).toEqual({
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-test",
+      provider: "openai-compatible",
+    });
   });
 
-  it("honors an in-plan requested model", async () => {
-    seedUsage(BigInt(1000));
-
-    const res = await POST(
-      chatRequest({ conversation_id: "conv_1", content: "hello", selectedModel: "gemini-3.1-pro-preview" })
-    );
-    await res.text();
-
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe("gemini-3.1-pro-preview");
-  });
-
-  it("uses the plan default when no model is requested", async () => {
+  it("uses the database default when no model is requested", async () => {
     seedUsage(BigInt(1000));
 
     const res = await POST(chatRequest({ conversation_id: "conv_1", content: "hello" }));
     await res.text();
 
-    expect(flexionStreamMock.mock.calls[0][0].model).toBe(planDefaultModel);
+    expect(flexionStreamMock.mock.calls[0][0].model).toBe("db-default");
+  });
+
+  it("returns 422 and skips the provider when no model is configured", async () => {
+    seedUsage(BigInt(1000));
+    resolveRequestedModelConfigMock.mockRejectedValueOnce(
+      new ApiError("AI_MODEL_NOT_CONFIGURED", "AI model is not configured")
+    );
+
+    const res = await POST(chatRequest({ conversation_id: "conv_1", content: "hello" }));
+
+    expect(res.status).toBe(422);
+    expect(flexionStreamMock).not.toHaveBeenCalled();
   });
 });
 
