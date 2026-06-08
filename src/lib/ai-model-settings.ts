@@ -246,15 +246,9 @@ export async function updateAiModelSetting(input: {
   `;
 }
 
-export async function pickConversationModels(_plan = "free") {
+export async function pickConversationModels() {
   const settings = await listActiveAiModelSettings("conversation");
   return settings.map(publicModelOption);
-}
-
-export function pickConversationModelsFromEnv(
-  _plan = "free",
-): Array<{ id: string; value: string; label: string; provider?: string }> {
-  return [];
 }
 
 export async function resolveRequestedModelConfig(_plan: string, requestedModel?: string | null): Promise<ResolvedAiModel> {
