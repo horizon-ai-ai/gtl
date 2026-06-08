@@ -96,4 +96,14 @@ describe("resolveRequestedModelConfig", () => {
       code: "AI_MODEL_NOT_CONFIGURED",
     });
   });
+
+  it("rejects with AI_MODEL_NOT_CONFIGURED (not a raw SyntaxError) on malformed ciphertext", async () => {
+    const malformed = makeRow({ id: "s1", model_id: "gpt-5.4", api_key_ciphertext: "not-json" });
+    mockQueryRaw.mockResolvedValue([malformed]);
+    await expect(resolveRequestedModelConfig("free", "gpt-5.4")).rejects.toBeInstanceOf(ApiError);
+    mockQueryRaw.mockResolvedValue([malformed]);
+    await expect(resolveRequestedModelConfig("free", "gpt-5.4")).rejects.toMatchObject({
+      code: "AI_MODEL_NOT_CONFIGURED",
+    });
+  });
 });
