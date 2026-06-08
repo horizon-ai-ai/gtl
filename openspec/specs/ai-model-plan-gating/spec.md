@@ -2,74 +2,65 @@
 
 ## Purpose
 
-TBD - created by archiving change 'fix-conversation-port-review-blockers'. Update Purpose after archive.
+Defines how the platform resolves which AI model serves a conversation or design-task request. Model selection is driven by admin-managed `AiModelSetting` rows (not a per-plan allowlist); when no model is configured the request fails with `AI_MODEL_NOT_CONFIGURED` rather than falling back to a default.
 
 ## Requirements
 
-### Requirement: Client-requested model is validated against the plan allowlist
+### Requirement: Conversation model is resolved from admin-managed database settings
 
-The chat message endpoints SHALL NOT forward a client-supplied model identifier to the AI provider without validation. When a request carries a model override (for example `selectedModel` or `preferredModel`), the system SHALL accept it only if it belongs to the requesting user's plan allowlist (the same set exposed for selection by the conversation models endpoint). If the requested model is absent, unknown, or outside the plan's allowlist, the system SHALL clamp the model to the plan default returned by `pickModel({ plan })`.
+The chat and design-task generation endpoints SHALL resolve the AI model from active `AiModelSetting` rows with `purpose = "conversation"` rather than from environment variables or a plan allowlist. The system SHALL NOT forward a client-supplied model identifier to the AI provider; a client override SHALL only select among the configured settings.
 
-#### Scenario: Requested model is within the plan allowlist
+When a request carries a model override (for example `selectedModel`, `preferredModel`, or `model`), the system SHALL select the active conversation setting whose `id` or `model_id` equals the override. If the override matches no active setting, the system SHALL fall back to the active setting marked `is_default`, and otherwise to the first active setting by sort order. The provider call SHALL use the selected setting's `model_id`, decrypted API key, and base URL.
 
-- **WHEN** a user on a plan whose allowlist includes the requested model sends a chat message with that model override
-- **THEN** the system SHALL use the requested model for the completion
+When no active conversation setting exists, the system SHALL reject the request with `AI_MODEL_NOT_CONFIGURED` (HTTP 422) and SHALL NOT call the AI provider. The system SHALL NOT substitute a plan default or an environment-configured model.
 
-#### Scenario: Requested model is outside the plan allowlist
+#### Scenario: Override matches a configured setting
 
-- **WHEN** a user sends a chat message with a model override that is not in their plan's allowlist
-- **THEN** the system SHALL use the plan default from `pickModel({ plan })` and SHALL NOT forward the requested model to the provider
+- **WHEN** a user sends a chat message whose override equals the `id` or `model_id` of an active conversation setting
+- **THEN** the system SHALL use that setting's `model_id` and provider configuration for the completion
 
-#### Scenario: Requested model is unknown or absent
+#### Scenario: Override matches no configured setting
 
-- **WHEN** a chat request carries an unrecognized model identifier or no override
-- **THEN** the system SHALL use the plan default from `pickModel({ plan })`
+- **WHEN** a user sends a chat message with an override that matches no active conversation setting
+- **THEN** the system SHALL use the default active setting (or the first active setting when none is marked default) and SHALL NOT forward the override to the provider
 
-##### Example: model resolution by plan
+#### Scenario: No conversation model is configured
 
-| Plan | Requested model | Resolved model |
-| ---- | --------------- | -------------- |
-| free | (none) | plan default |
-| free | premium model not in free allowlist | plan default (clamped) |
-| free | model in free allowlist | requested model |
-| free | unknown string | plan default (clamped) |
+- **WHEN** a chat or design-task generation request is made while no active conversation setting exists
+- **THEN** the system SHALL return `AI_MODEL_NOT_CONFIGURED` with HTTP 422 and SHALL NOT call the AI provider
+
+##### Example: model resolution from database settings
+
+| Active settings (id, model_id, default) | Requested override | Resolved model |
+| --------------------------------------- | ------------------ | -------------- |
+| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | (none) | gpt-5.4 (default) |
+| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | s2 | claude-opus-4-7 (by id) |
+| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | claude-opus-4-7 | claude-opus-4-7 (by model_id) |
+| [(s1, gpt-5.4, true), (s2, claude-opus-4-7, false)] | unknown-model | gpt-5.4 (default fallback) |
+| [] | anything | error: AI_MODEL_NOT_CONFIGURED (422) |
 
 <!-- @trace
-source: fix-conversation-port-review-blockers
-updated: 2026-06-05
+source: fix-db-model-resolution-tests
+updated: 2026-06-08
 code:
-  - src/lib/conversation/generation-dispatcher.ts
-  - docs/19_修復說明_對話移植審查.pdf
-  - src/lib/project-orders.ts
-  - src/app/api/chat/messages/route.ts
-  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.ts
-  - src/lib/credits.ts
-  - src/app/api/conversations/[id]/messages/route.ts
-  - src/hooks/useConversations.ts
-  - docs/19_修復說明_對話移植審查.html
-  - docs/19_修復說明_對話移植審查.md
-  - docs/18_code_review_conversation_port.md
+  - docs/21_修復說明_G3改版合併前修正.pdf
   - docs/19_修復說明_對話移植審查_表格版.pdf
-  - src/app/api/orders/[id]/accept-quote/route.ts
-  - src/lib/api.ts
-  - src/app/api/orders/[id]/messages/route.ts
+  - docs/19_修復說明_對話移植審查.md
+  - docs/22_ai_model_settings_seed_notes.md
+  - docs/19_修復說明_對話移植審查.html
   - src/lib/conversation/api.ts
-  - docs/19_修復說明_對話移植審查_表格版.html
-  - src/app/api/admin/orders/[id]/start/route.ts
-  - docs/17_spec_gap_roadmap.md
+  - src/lib/ai-model-settings.ts
   - docs/admin_api_extraction_pattern.md
-  - src/app/api/orders/[id]/route.ts
+  - docs/19_修復說明_對話移植審查_表格版.html
+  - docs/17_spec_gap_roadmap.md
+  - docs/20_code_review_g3_ui_redesign.md
+  - docs/21_修復說明_G3改版合併前修正.html
+  - docs/19_修復說明_對話移植審查.pdf
+  - docs/21_修復說明_G3改版合併前修正.md
+  - src/app/api/conversations/models/route.ts
 tests:
-  - src/app/api/orders/[id]/messages/route.test.ts
   - src/app/api/chat/messages/route.test.ts
-  - src/hooks/useConversations.stream.test.ts
-  - src/app/api/orders/[id]/accept-quote/route.test.ts
-  - src/lib/credits.test.ts
   - src/lib/conversation/resolve-requested-model.test.ts
-  - src/lib/conversation/generation-dispatcher.test.ts
-  - src/app/api/orders/[id]/downstream-gates.test.ts
-  - src/app/api/orders/[id]/route.test.ts
-  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.test.ts
-  - src/app/api/admin/orders/[id]/start/route.test.ts
   - src/app/api/conversations/[id]/messages/route.test.ts
+  - src/app/api/conversations/[id]/design-tasks/[taskId]/generate/route.test.ts
 -->
