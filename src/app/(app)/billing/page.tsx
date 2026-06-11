@@ -182,7 +182,7 @@ export default function BillingPage() {
 
       {status ? <div className="rounded-md border bg-neutral-50 px-4 py-3 text-sm">{status}</div> : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+      <div className="grid items-start gap-6 lg:grid-cols-[1.2fr,0.8fr] lg:items-stretch">
         <Card>
           <CardHeader>
             <CardTitle>目前方案</CardTitle>
@@ -239,18 +239,19 @@ export default function BillingPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <div className="relative lg:min-h-0">
+        <Card className="flex flex-col lg:absolute lg:inset-0">
           <CardHeader>
             <CardTitle>最近計費紀錄</CardTitle>
             <CardDescription>目前為 sandbox invoice 紀錄，可先驗證方案切換流程。</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-h-0 flex-1">
             {loading ? (
               <div className="text-sm text-neutral-500">載入中...</div>
             ) : invoices.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-sm text-neutral-500">尚無計費紀錄。</div>
             ) : (
-              <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+              <div className="max-h-72 space-y-3 overflow-y-auto pr-1 lg:max-h-full">
                 {invoices.map((invoice) => (
                   <div key={invoice.id} className="rounded-md border p-3 text-sm">
                     <div className="flex items-center justify-between gap-3">
@@ -273,6 +274,7 @@ export default function BillingPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
 
       <Card>
