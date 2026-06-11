@@ -85,6 +85,57 @@ export default async function AdminTradeProductsPage() {
                 <td className="p-3">
                   <div className="font-medium">{product.name}</div>
                   <div className="text-xs text-neutral-500">{product.description?.slice(0, 80) ?? ""}</div>
+                  {(() => {
+                    const specs = (product.specs ?? {}) as Record<string, unknown>;
+                    const matrix = Array.isArray(specs.spec_matrix)
+                      ? (specs.spec_matrix as Array<Record<string, unknown>>).slice(0, 3)
+                      : [];
+                    const specText = typeof specs.product_spec_text === "string" ? specs.product_spec_text : "";
+                    const storage = typeof specs.storage_days === "string" ? specs.storage_days : "";
+                    if (!matrix.length && !specText && !storage) return null;
+                    const cell = (entry: Record<string, unknown> | undefined, key: string) =>
+                      typeof entry?.[key] === "string" && entry[key] ? String(entry[key]) : "—";
+                    return (
+                      <details className="mt-1 text-xs text-neutral-600">
+                        <summary className="cursor-pointer select-none text-neutral-500">規格資料</summary>
+                        <div className="mt-1 space-y-1">
+                          {specText ? <div>商品規格：{specText}</div> : null}
+                          {storage ? <div>保存效期：{storage}</div> : null}
+                          {matrix.length ? (
+                            <table className="mt-1 border-collapse">
+                              <thead>
+                                <tr>
+                                  <th className="border border-neutral-200 bg-neutral-50 px-2 py-1 text-left font-medium">項目</th>
+                                  {matrix.map((_, index) => (
+                                    <th key={index} className="border border-neutral-200 bg-neutral-50 px-2 py-1 text-left font-medium">
+                                      規格{["一", "二", "三"][index]}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[
+                                  ["price_usd", "單價 USD"],
+                                  ["dimensions_cm", "長寬高 CM"],
+                                  ["net_weight_kg", "淨重 KG"],
+                                  ["gross_weight_kg", "毛重 KG"],
+                                ].map(([key, label]) => (
+                                  <tr key={key}>
+                                    <td className="border border-neutral-200 px-2 py-1 text-neutral-500">{label}</td>
+                                    {matrix.map((entry, index) => (
+                                      <td key={`${key}-${index}`} className="border border-neutral-200 px-2 py-1">
+                                        {cell(entry, key)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          ) : null}
+                        </div>
+                      </details>
+                    );
+                  })()}
                 </td>
                 <td className="p-3">
                   {product.seller.company?.name ?? "—"}
