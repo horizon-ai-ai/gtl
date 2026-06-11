@@ -1232,6 +1232,10 @@ async function buildVisualDirection(params: {
 }): Promise<WebsiteVisualDirection> {
   const styleKey = normalizeWebsiteStyleValue(params.style) || "minimal-luxury";
   const fallbackTokens = fallbackThemeTokens(styleKey, stylePrimaryColor(styleKey));
+  // Still env-based — follow-up: the website-builder orchestrator's LLM calls
+  // have not been migrated to DB-resolved providerConfig (see
+  // fix-ai-model-resolution-review proposal Non-Goals, alongside support/ask
+  // and admin/copilot).
   try {
     const result = await flexionCompleteJSON<{
       primaryColor?: unknown;

@@ -63,13 +63,21 @@ export function encryptModelApiKey(value: string) {
 }
 
 export function decryptModelApiKey(value: string) {
-  const payload = JSON.parse(value) as { iv: string; tag: string; ciphertext: string };
-  const decipher = createDecipheriv(ALGORITHM, encryptionKey(), Buffer.from(payload.iv, "base64"));
-  decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(payload.ciphertext, "base64")),
-    decipher.final(),
-  ]).toString("utf8");
+  // A malformed ciphertext (bad JSON, wrong shape, failed auth tag) is a
+  // configuration problem, not a server bug: surface it as
+  // AI_MODEL_NOT_CONFIGURED rather than letting a raw SyntaxError escape.
+  try {
+    const payload = JSON.parse(value) as { iv: string; tag: string; ciphertext: string };
+    const decipher = createDecipheriv(ALGORITHM, encryptionKey(), Buffer.from(payload.iv, "base64"));
+    decipher.setAuthTag(Buffer.from(payload.tag, "base64"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, "base64")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("AI_MODEL_NOT_CONFIGURED", "Stored AI model API key could not be decrypted");
+  }
 }
 
 export function modelApiKeyHint(value: string) {
@@ -96,7 +104,23 @@ export function publicModelOption(setting: AiModelSettingRecord) {
   };
 }
 
-export async function ensureAiModelSettingsTable() {
+// The Prisma migration is the source of truth for this table; this runtime
+// DDL is a defensive backstop. Memoize it with a module-level Promise so the
+// CREATE/ALTER/CREATE INDEX block runs at most once per process instead of on
+// every resolution. On failure the cache is cleared so a later call can retry.
+let ensureTablePromise: Promise<void> | null = null;
+
+export function ensureAiModelSettingsTable(): Promise<void> {
+  if (!ensureTablePromise) {
+    ensureTablePromise = runEnsureAiModelSettingsTable().catch((err) => {
+      ensureTablePromise = null;
+      throw err;
+    });
+  }
+  return ensureTablePromise;
+}
+
+async function runEnsureAiModelSettingsTable() {
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "AiModelSetting" (
       "id" uuid NOT NULL DEFAULT gen_random_uuid(),

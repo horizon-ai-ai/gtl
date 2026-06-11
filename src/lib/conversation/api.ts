@@ -9,7 +9,7 @@ import {
 } from "@prisma/client";
 
 import { ApiError } from "@/lib/api";
-import { pickConversationModelsFromEnv, resolveRequestedModelConfig } from "@/lib/ai-model-settings";
+import { resolveRequestedModelConfig } from "@/lib/ai-model-settings";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import {
@@ -63,18 +63,6 @@ export function parseExecutionStrategy(value: unknown): ExecutionStrategy | null
   return Object.values(ExecutionStrategy).includes(value as ExecutionStrategy)
     ? (value as ExecutionStrategy)
     : null;
-}
-
-export function pickConversationModels(plan = "free") {
-  return pickConversationModelsFromEnv(plan);
-}
-
-export function resolveRequestedModel(plan: string, requestedModel?: string | null): string {
-  const requested = typeof requestedModel === "string" ? requestedModel.trim() : "";
-  if (requested && pickConversationModels(plan).some((model) => model.id === requested)) {
-    return requested;
-  }
-  throw new ApiError("AI_MODEL_NOT_CONFIGURED", "AI model is not configured");
 }
 
 export async function resolveRequestedModelForProvider(plan: string, requestedModel?: string | null) {

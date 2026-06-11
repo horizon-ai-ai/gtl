@@ -25,6 +25,8 @@ type Props = {
   stages: TradeStage[];
   /** True for admin or order owner; controls whether the advance button shows. */
   canAdvance: boolean;
+  /** Buyer/company name snapshotted on the order; shown as 成立者 under the order-created node. */
+  creatorName?: string | null;
   inquiryId?: string | null;
   onAdvanced?: () => void;
 };
@@ -36,6 +38,7 @@ export function TradeOrderTimeline({
   etaDisplay,
   stages,
   canAdvance,
+  creatorName,
   inquiryId,
   onAdvanced,
 }: Props) {
@@ -113,11 +116,12 @@ export function TradeOrderTimeline({
           <div
             className="pointer-events-none absolute left-2 top-3 -z-0 h-px bg-stone-700 transition-all"
             style={{
-              width: `calc(${(Math.max(0, activeIdx) / Math.max(1, stages.length - 1)) * 100}% )`,
+              // No active stage means every stage is done — fill the bar.
+              width: `calc(${(activeIdx === -1 ? 1 : activeIdx / Math.max(1, stages.length - 1)) * 100}% )`,
             }}
           />
 
-          {stages.map((stage, idx) => {
+          {stages.map((stage) => {
             const node =
               stage.state === "done" ? (
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-900 text-white">
@@ -143,9 +147,9 @@ export function TradeOrderTimeline({
                 >
                   {stage.label}
                 </div>
-                {idx === 2 && stage.state === "done" ? (
+                {stage.key === "order_created" && stage.state === "done" && creatorName ? (
                   <div className="mt-1 text-[10px] leading-tight text-stone-500">
-                    成立者 SHINKA
+                    成立者 {creatorName}
                   </div>
                 ) : null}
               </div>

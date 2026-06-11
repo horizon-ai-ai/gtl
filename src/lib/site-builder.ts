@@ -1,5 +1,5 @@
 import { ApiError } from "./api";
-import { flexionStream, pickModel } from "./flexion";
+import { flexionStream, pickModel, type FlexionRequest } from "./flexion";
 import type { TradeProductDraft } from "./trade-vision";
 
 export type SitePageSection = {
@@ -239,10 +239,13 @@ export async function generateSiteSchema(input: {
   product_notes?: string;
   product_image_urls?: string[];
   product_draft?: Partial<TradeProductDraft> | null;
+  providerConfig?: FlexionRequest["providerConfig"];
 }) {
   const baseUrl = process.env.FLEXION_API_BASE_URL ?? "";
   const apiKey = process.env.FLEXION_API_KEY ?? "";
-  if (!baseUrl || !apiKey) {
+  // A resolved providerConfig is enough on its own; only fall back when there
+  // is neither a resolved provider nor an env-configured Flexion provider.
+  if (!input.providerConfig && (!baseUrl || !apiKey)) {
     return {
       ...FALLBACK_SCHEMA,
       title: input.business_name || FALLBACK_SCHEMA.title,
@@ -282,6 +285,7 @@ export async function generateSiteSchema(input: {
     for await (const evt of flexionStream({
       model,
       stream: false,
+      providerConfig: input.providerConfig,
       messages: [
         {
           role: "system",

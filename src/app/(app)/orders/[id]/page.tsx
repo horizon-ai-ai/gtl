@@ -576,6 +576,7 @@ export default function OrderDetailPage() {
             etaDisplay={etaDisplay}
             stages={stages}
             canAdvance={canAdvance}
+            creatorName={order.customer?.name ?? null}
             inquiryId={(order.metadata?.inquiry_id as string | undefined) ?? null}
             onAdvanced={() => void loadOrder()}
           />

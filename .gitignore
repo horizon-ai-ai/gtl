@@ -64,3 +64,5 @@ openspec/.vector-search.db*
 
 # Local dev scripts
 /scripts/local
+# Personal working docs (code reviews, notes) — not shared
+.notes/

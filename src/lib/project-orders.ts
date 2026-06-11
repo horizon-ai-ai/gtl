@@ -24,8 +24,9 @@ const ALLOWED_TRANSITIONS: Record<string, OrderStatus[]> = {
   draft: ["quote_pending", "cancelled"],
   quote_pending: ["quoted", "cancelled"],
   quoted: ["confirmed", "cancelled"],
-  confirmed: ["in_execution", "cancelled"],
+  confirmed: ["in_execution", "shipped", "cancelled"],
   in_execution: ["closed", "cancelled"],
+  shipped: ["completed", "cancelled"],
   closed: [],
   cancelled: [],
 };
@@ -47,14 +48,17 @@ export function assertProjectTransition(from: OrderStatus, to: OrderStatus) {
   }
 }
 
-export async function writeOrderStatusHistory(params: {
-  orderId: string;
-  fromStatus?: OrderStatus | null;
-  toStatus: OrderStatus;
-  actorId?: string | null;
-  reason?: string | null;
-}) {
-  await prisma.orderStatusHistory.create({
+export async function writeOrderStatusHistory(
+  params: {
+    orderId: string;
+    fromStatus?: OrderStatus | null;
+    toStatus: OrderStatus;
+    actorId?: string | null;
+    reason?: string | null;
+  },
+  client: Pick<Prisma.TransactionClient, "orderStatusHistory"> = prisma,
+) {
+  await client.orderStatusHistory.create({
     data: {
       order_id: params.orderId,
       from_status: params.fromStatus ?? null,

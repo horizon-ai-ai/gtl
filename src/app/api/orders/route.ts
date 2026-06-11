@@ -4,7 +4,7 @@ import type { DesignTask, Message, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { ok, fail, handleError } from "@/lib/api";
+import { ok, fail, handleError, ApiError } from "@/lib/api";
 import { writeOrderStatusHistory } from "@/lib/project-orders";
 import { cleanTaskSummary, customerInputsText, isDeliveryStatusSummary, valueToRecord } from "@/lib/project-brief";
 import { generateOrderNo } from "@/lib/utils";
@@ -337,6 +337,21 @@ function deriveServiceType(order: {
   return "other";
 }
 
+/** Parse a date query param; malformed values fail with 400 before any query runs. */
+function parseDateParam(name: string, value: string | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ApiError("VALIDATION_ERROR", `Invalid ${name}: expected a date like YYYY-MM-DD`);
+  }
+  return parsed;
+}
+
+/** Exclusive next-day upper bound so end-date filters include the entire selected day (UTC). */
+function nextDay(date: Date) {
+  return new Date(date.getTime() + 24 * 60 * 60 * 1000);
+}
+
 const SERVICE_TYPE_FILTERS: Record<string, (where: Prisma.OrderWhereInput) => Prisma.OrderWhereInput> = {
   marketing: (w) => ({ ...w, project_type: "copywriting" }),
   design: (w) => ({ ...w, project_type: "design" }),
@@ -359,10 +374,11 @@ export async function GET(req: NextRequest) {
 
     const status = params.get("status") ?? undefined;
     const service = params.get("service_type") ?? undefined;
-    const dateStart = params.get("date_start");
-    const dateEnd = params.get("date_end");
-    const quoteStart = params.get("quote_date_start");
-    const quoteEnd = params.get("quote_date_end");
+    // Date params are UTC day windows (per-user timezone fidelity is out of scope).
+    const dateStart = parseDateParam("date_start", params.get("date_start"));
+    const dateEnd = parseDateParam("date_end", params.get("date_end"));
+    const quoteStart = parseDateParam("quote_date_start", params.get("quote_date_start"));
+    const quoteEnd = parseDateParam("quote_date_end", params.get("quote_date_end"));
     const q = (params.get("q") ?? "").trim();
 
     let where: Prisma.OrderWhereInput = {
@@ -373,14 +389,14 @@ export async function GET(req: NextRequest) {
 
     if (dateStart || dateEnd) {
       where.created_at = {
-        ...(dateStart ? { gte: new Date(dateStart) } : {}),
-        ...(dateEnd ? { lte: new Date(dateEnd) } : {}),
+        ...(dateStart ? { gte: dateStart } : {}),
+        ...(dateEnd ? { lt: nextDay(dateEnd) } : {}),
       };
     }
     if (quoteStart || quoteEnd) {
       where.submitted_at = {
-        ...(quoteStart ? { gte: new Date(quoteStart) } : {}),
-        ...(quoteEnd ? { lte: new Date(quoteEnd) } : {}),
+        ...(quoteStart ? { gte: quoteStart } : {}),
+        ...(quoteEnd ? { lt: nextDay(quoteEnd) } : {}),
       };
     }
     if (q) {

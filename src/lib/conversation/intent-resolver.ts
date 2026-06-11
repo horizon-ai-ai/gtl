@@ -163,6 +163,7 @@ export async function inferConversationIntent(params: InferUserIntentParams): Pr
   try {
     const result = await flexionComplete({
       model: params.model || pickModel({ plan: "free", taskHint: "fast" }),
+      providerConfig: params.providerConfig,
       messages: [
         { role: "system", content: systemPrompt() },
         {
@@ -178,7 +179,6 @@ export async function inferConversationIntent(params: InferUserIntentParams): Pr
       temperature: 0,
       response_format: { type: "json_object" },
       max_tokens: 600,
-      providerConfig: params.providerConfig,
     });
     const parsed = safeJson(result.text);
     if (!parsed) return null;

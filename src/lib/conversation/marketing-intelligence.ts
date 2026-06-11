@@ -494,6 +494,10 @@ export class MarketingIntelligenceService {
     const routerModel = await resolvePurposeModelConfig("marketing_router");
     const searchModel = await resolvePurposeModelConfig("marketing_search");
     const deepSearchModel = await resolvePurposeModelConfig("marketing_deep");
+    // No usable search model means research can never complete, so skip the
+    // router classification LLM call entirely rather than classifying first and
+    // discarding the result at the post-classification search-model check.
+    if (!searchModel && !deepSearchModel) return null;
     if (!params.forceSearch && !routerModel) return null;
 
     if (!params.forceSearch) {
