@@ -27,7 +27,7 @@ function labelSpec(key: string) {
     carton_quantity: "箱入數",
     carton_net_weight_kg: "箱重（淨重 KG）",
     carton_gross_weight_kg: "箱重（毛重 KG）",
-    storage_days: "保存日期",
+    storage_days: "保存效期",
     storage_unit: "保存日期單位",
     storage_method: "保存方式",
     temp_control: "是否需控溫",
@@ -124,7 +124,7 @@ export default async function TradeProductDetailPage({
                 <div className="text-sm font-medium mb-2">規格</div>
                 <div className="grid gap-3 md:grid-cols-2">
                   {Object.entries(product.specs as Record<string, unknown>)
-                    .filter(([key]) => key !== "special_variants" && key !== "special_spec_enabled")
+                    .filter(([key]) => key !== "special_variants" && key !== "special_spec_enabled" && key !== "spec_matrix")
                     .map(([key, value]) => (
                       <div key={key} className="rounded-md border bg-neutral-50 px-3 py-2 text-sm">
                         <div className="text-neutral-500">{labelSpec(key)}</div>
@@ -132,6 +132,42 @@ export default async function TradeProductDetailPage({
                       </div>
                     ))}
                 </div>
+                {Array.isArray((product.specs as Record<string, unknown>).spec_matrix) ? (
+                  <div className="mt-4 overflow-x-auto">
+                    <div className="mb-2 text-sm font-medium">規格價格與包裝</div>
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr>
+                          <th className="border bg-neutral-50 px-3 py-2 text-left font-medium text-neutral-700">商品</th>
+                          {["規格一", "規格二", "規格三"].map((title) => (
+                            <th key={title} className="border bg-neutral-50 px-3 py-2 text-left font-medium text-neutral-700">
+                              {title}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          { key: "price_usd", label: "單價：USD" },
+                          { key: "dimensions_cm", label: "長、寬、高（CM）" },
+                          { key: "net_weight_kg", label: "淨重（KG）" },
+                          { key: "gross_weight_kg", label: "毛重（KG）" },
+                        ].map((row) => (
+                          <tr key={row.key}>
+                            <td className="border bg-neutral-50 px-3 py-2 text-neutral-500">{row.label}</td>
+                            {(((product.specs as Record<string, unknown>).spec_matrix as Array<Record<string, unknown>>) ?? [])
+                              .slice(0, 3)
+                              .map((entry, index) => (
+                                <td key={`${row.key}-${index}`} className="border px-3 py-2">
+                                  {typeof entry?.[row.key] === "string" ? String(entry[row.key]) : ""}
+                                </td>
+                              ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
                 {(product.specs as Record<string, unknown>).special_spec_enabled === true &&
                 Array.isArray((product.specs as Record<string, unknown>).special_variants) ? (
                   <div className="mt-4">

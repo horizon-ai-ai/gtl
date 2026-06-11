@@ -16,6 +16,13 @@ const variantSchema = z.object({
   price_fob_usd: z.string().max(50).optional(),
 });
 
+const specMatrixEntrySchema = z.object({
+  price_usd: z.string().max(50).optional(),
+  dimensions_cm: z.string().max(100).optional(),
+  net_weight_kg: z.string().max(50).optional(),
+  gross_weight_kg: z.string().max(50).optional(),
+});
+
 const specsSchema = z.object({
   unit_length_cm: z.string().max(50).optional(),
   unit_width_cm: z.string().max(50).optional(),
@@ -43,6 +50,7 @@ const specsSchema = z.object({
   promo_price: z.string().max(50).optional(),
   special_spec_enabled: z.boolean().optional(),
   special_variants: z.array(variantSchema).max(50).optional(),
+  spec_matrix: z.array(specMatrixEntrySchema).max(3).optional(),
   storage_days: z.string().max(50).optional(),
   storage_unit: z.string().max(50).optional(),
   storage_method: z.string().max(120).optional(),

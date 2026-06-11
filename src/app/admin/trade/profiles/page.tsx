@@ -97,8 +97,60 @@ export default async function AdminTradeProfilesPage() {
                   <div className="text-xs text-neutral-500">{profile.user.email}</div>
                 </td>
                 <td className="p-3">
-                  <div>{profile.user.company?.name ?? "—"}</div>
-                  <div className="text-xs text-neutral-500">{profile.user.company?.tax_id ?? "無統編"}</div>
+                  {(() => {
+                    const info = (profile.company_info ?? {}) as Record<string, unknown>;
+                    const text = (key: string) => (typeof info[key] === "string" ? (info[key] as string) : "");
+                    const name = text("company_name") || profile.user.company?.name;
+                    const taxId = text("tax_id") || profile.user.company?.tax_id;
+                    const detailRows: Array<[string, string]> = [
+                      ["公司英文名稱", text("company_name_en")],
+                      ["公司地址", text("company_address")],
+                      ["公司產業", text("industry")],
+                      ["聯絡人", text("contact_name")],
+                      ["聯絡電話", text("contact_phone")],
+                      ["聯絡信箱", text("contact_email")],
+                      [
+                        "如何知道此服務",
+                        Array.isArray(info.referral_sources) ? (info.referral_sources as string[]).join(", ") : "",
+                      ],
+                      ["官方網站", text("website")],
+                      ["備註", text("remarks")],
+                      ["收款帳戶名稱", text("bank_account_name")],
+                      ["收款帳戶號碼", text("bank_account_number")],
+                      ["SWIFT CODE", text("bank_swift_code")],
+                      ["合約同意", info.contract_agreed === true ? "已同意" : ""],
+                    ].filter(([, value]) => Boolean(value)) as Array<[string, string]>;
+                    return (
+                      <>
+                        <div>{name ?? "—"}</div>
+                        <div className="text-xs text-neutral-500">{taxId ?? "無統編"}</div>
+                        {detailRows.length > 0 || text("bank_passbook_image") ? (
+                          <details className="mt-1 text-xs text-neutral-600">
+                            <summary className="cursor-pointer select-none text-neutral-500">申請資料</summary>
+                            <dl className="mt-1 space-y-0.5">
+                              {detailRows.map(([label, value]) => (
+                                <div key={label}>
+                                  <span className="text-neutral-400">{label}：</span>
+                                  {value}
+                                </div>
+                              ))}
+                              {text("bank_passbook_image") ? (
+                                <div>
+                                  <a
+                                    href={text("bank_passbook_image")}
+                                    target="_blank"
+                                    className="underline underline-offset-2"
+                                  >
+                                    存摺照片
+                                  </a>
+                                </div>
+                              ) : null}
+                            </dl>
+                          </details>
+                        ) : null}
+                      </>
+                    );
+                  })()}
                 </td>
                 <td className="p-3 uppercase">{profile.role === "both" ? "seller" : profile.role}</td>
                 <td className="p-3 text-neutral-600">
