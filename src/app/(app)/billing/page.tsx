@@ -182,7 +182,7 @@ export default function BillingPage() {
 
       {status ? <div className="rounded-md border bg-neutral-50 px-4 py-3 text-sm">{status}</div> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
+      <div className="grid items-start gap-6 lg:grid-cols-[1.2fr,0.8fr]">
         <Card>
           <CardHeader>
             <CardTitle>目前方案</CardTitle>
@@ -244,30 +244,32 @@ export default function BillingPage() {
             <CardTitle>最近計費紀錄</CardTitle>
             <CardDescription>目前為 sandbox invoice 紀錄，可先驗證方案切換流程。</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent>
             {loading ? (
               <div className="text-sm text-neutral-500">載入中...</div>
             ) : invoices.length === 0 ? (
               <div className="rounded-md border border-dashed p-4 text-sm text-neutral-500">尚無計費紀錄。</div>
             ) : (
-              invoices.map((invoice) => (
-                <div key={invoice.id} className="rounded-md border p-3 text-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium">{invoice.type}</div>
-                    <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs">{invoice.status}</span>
-                  </div>
-                  <div className="mt-1 text-neutral-700">{formatTWD(invoice.amount)} {invoice.currency}</div>
-                  <div className="mt-1 text-xs text-neutral-500">
-                    {new Date(invoice.created_at).toLocaleString()}
-                    {invoice.paid_at ? ` · paid ${new Date(invoice.paid_at).toLocaleString()}` : ""}
-                  </div>
-                  {invoice.metadata?.plan_name ? (
-                    <div className="mt-1 text-xs text-neutral-500">
-                      方案：{String(invoice.metadata.plan_name)}
+              <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+                {invoices.map((invoice) => (
+                  <div key={invoice.id} className="rounded-md border p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium">{invoice.type}</div>
+                      <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs">{invoice.status}</span>
                     </div>
-                  ) : null}
-                </div>
-              ))
+                    <div className="mt-1 text-neutral-700">{formatTWD(invoice.amount)} {invoice.currency}</div>
+                    <div className="mt-1 text-xs text-neutral-500">
+                      {new Date(invoice.created_at).toLocaleString()}
+                      {invoice.paid_at ? ` · paid ${new Date(invoice.paid_at).toLocaleString()}` : ""}
+                    </div>
+                    {invoice.metadata?.plan_name ? (
+                      <div className="mt-1 text-xs text-neutral-500">
+                        方案：{String(invoice.metadata.plan_name)}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>
