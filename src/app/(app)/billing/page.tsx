@@ -171,6 +171,7 @@ export default function BillingPage() {
   }
 
   return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
     <div className="mx-auto max-w-6xl space-y-6 p-8">
       <div>
         <h1 className="text-2xl font-semibold">方案與計費</h1>
@@ -277,17 +278,17 @@ export default function BillingPage() {
           <CardTitle>方案比較</CardTitle>
           <CardDescription>依需求選擇方案；Lead 商業版為商業落地首選。</CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
+        <CardContent className="overflow-x-auto p-5 pt-0 lg:p-6 lg:pt-0">
           <table className="w-full min-w-[960px] border-collapse text-sm">
             <thead>
               <tr>
-                <th className="w-32 border-b border-neutral-200 bg-blue-50/70 px-3 py-3 text-left font-semibold text-neutral-800">
+                <th className="w-32 border border-neutral-200 bg-blue-50/70 px-3 py-3 text-left font-semibold text-neutral-800">
                   項目
                 </th>
                 {PLAN_COLUMNS.map((column) => (
                   <th
                     key={column.code}
-                    className="border-b border-neutral-200 bg-blue-50/70 px-3 py-3 text-center font-semibold text-neutral-800"
+                    className="border border-neutral-200 bg-blue-50/70 px-3 py-3 text-center font-semibold text-neutral-800"
                   >
                     {column.recommended ? (
                       <div className="mb-1 text-xs font-semibold italic text-blue-700">最推薦｜商業落地首選</div>
@@ -298,7 +299,7 @@ export default function BillingPage() {
                     ) : null}
                   </th>
                 ))}
-                <th className="w-44 border-b border-neutral-200 bg-blue-50/70 px-3 py-3 text-center font-semibold text-neutral-800">
+                <th className="w-44 border border-neutral-200 bg-blue-50/70 px-3 py-3 text-center font-semibold text-neutral-800">
                   客製化服務
                 </th>
               </tr>
@@ -306,11 +307,11 @@ export default function BillingPage() {
             <tbody>
               {PLAN_ROWS.map((row, rowIndex) => (
                 <tr key={row.key} className={rowIndex % 2 === 1 ? "bg-neutral-50/60" : ""}>
-                  <td className="border-b border-neutral-100 px-3 py-3 font-medium text-neutral-700">{row.label}</td>
+                  <td className="border border-neutral-200 px-3 py-3 font-medium text-neutral-700">{row.label}</td>
                   {PLAN_COLUMNS.map((column) => (
                     <td
                       key={`${row.key}-${column.code}`}
-                      className="whitespace-pre-line border-b border-neutral-100 px-3 py-3 text-center text-neutral-700"
+                      className="whitespace-pre-line border border-neutral-200 px-3 py-3 text-center text-neutral-700"
                     >
                       {column[row.key]}
                     </td>
@@ -318,7 +319,7 @@ export default function BillingPage() {
                   {rowIndex === 0 ? (
                     <td
                       rowSpan={PLAN_ROWS.length + 2}
-                      className="border-b border-neutral-100 px-4 py-3 text-center align-middle text-neutral-600"
+                      className="border border-neutral-200 bg-white px-4 py-3 text-center align-middle text-neutral-600"
                     >
                       {CUSTOM_SERVICE_PITCH}
                     </td>
@@ -326,20 +327,20 @@ export default function BillingPage() {
                 </tr>
               ))}
               <tr>
-                <td className="border-b border-neutral-100 px-3 py-3 font-medium text-neutral-700">人工處理報價服務</td>
+                <td className="border border-neutral-200 px-3 py-3 font-medium text-neutral-700">人工處理報價服務</td>
                 {PLAN_COLUMNS.map((column) => (
-                  <td key={`manual-${column.code}`} className="border-b border-neutral-100 px-3 py-3 text-center">
+                  <td key={`manual-${column.code}`} className="border border-neutral-200 px-3 py-3 text-center">
                     <Check className="mx-auto h-4 w-4 text-green-600" />
                   </td>
                 ))}
               </tr>
               <tr>
-                <td className="px-3 py-3" />
+                <td className="border border-neutral-200 px-3 py-3" />
                 {PLAN_COLUMNS.map((column) => {
                   const plan = plans.find((p) => p.code === column.code);
                   const isCurrent = sub?.plan.code === column.code;
                   return (
-                    <td key={`action-${column.code}`} className="px-3 py-3 text-center">
+                    <td key={`action-${column.code}`} className="border border-neutral-200 px-3 py-3 text-center">
                       <Button
                         size="sm"
                         variant={isCurrent || column.recommended ? "default" : "outline"}
@@ -370,6 +371,7 @@ export default function BillingPage() {
           </table>
         </CardContent>
       </Card>
+    </div>
     </div>
   );
 }
