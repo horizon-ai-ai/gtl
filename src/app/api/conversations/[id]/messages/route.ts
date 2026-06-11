@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { DesignTaskStatus, DesignTaskType, MessageRole, MessageType, type DesignTask, type Message, type Prisma } from "@prisma/client";
 
-import { handleError, ok } from "@/lib/api";
+import { ApiError, handleError, ok } from "@/lib/api";
 import { assertCreditsAvailable, consumeCredits } from "@/lib/credits";
 import { prisma } from "@/lib/db";
 import { detectRecommendedActions, extractSuggestedItems } from "@/lib/chat-handoff";
@@ -16,8 +17,14 @@ import {
   resolveTaskCreateInput,
   shapeDesignTask,
   shapeMessage,
+  shapeMessageWithSiblings,
   toInputJson,
 } from "@/lib/conversation/api";
+import {
+  loadActivePathMessages,
+  resolveAppendParentMessageId,
+  resolveSiblingParentMessageId,
+} from "@/lib/conversation/active-path";
 import {
   getSchema,
   resolveDefaultExecutionStrategy,
@@ -25,13 +32,15 @@ import {
 } from "@/lib/conversation/schema-registry";
 import { inferConversationIntent, type UserIntentResult } from "@/lib/conversation/intent-resolver";
 import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
+import { dispatchTextGeneration } from "@/lib/conversation/dispatch/text-generation";
+import { isCancelRequested } from "@/lib/conversation/dispatch/shared";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
-import { flexionComplete, flexionStream, pickModel, rawToCredits } from "@/lib/flexion";
+import { flexionComplete, flexionStream, rawToCredits, type FlexionRequest } from "@/lib/flexion";
 import { handleWebsiteBuilderTurn } from "@/lib/website-builder/orchestrator";
 import { routeWebsiteKind } from "@/lib/website-builder/intent-router";
 import { saveSiteFiles } from "@/lib/site-assets";
-import { appendCustomerInput, cleanTaskSummary } from "@/lib/project-brief";
+import { appendCustomerInput, cleanTaskSummary, customerInputsText, valueToRecord } from "@/lib/project-brief";
 
 const CONVERSATION_SYSTEM_PROMPT = [
   "你是 GTL 的設計與行銷顧問助理，請以繁體中文回覆。",
@@ -42,7 +51,7 @@ const CONVERSATION_SYSTEM_PROMPT = [
   "設計任務開場先確認要放上的資訊內容或請客戶上傳素材，再確認整體設計感覺；不要一開始問完整品牌理念、個性、客群、使用場景清單。",
   "使用者沒想法時，請給風格方向與參考靈感平台/圖片方向讓客戶挑，例如 Pinterest、Behance、Dribbble、Freepik 對應的風格用途。",
   "使用者沒想法或叫你決定時，請先提出你的推薦方向與理由，再補下一個最小缺口。",
-  "如果已足夠產生合理第一版，整理 brief 並建議可以產生。",
+  "如果已足夠產生合理第一版，請整理成可執行方向與第一版交付目標，並建議可以產生；不要稱為 brief、需求整理或交給寫手的指示。",
 ].join("\n");
 
 type G3FlowStep = {
@@ -231,19 +240,115 @@ async function recordCustomerInputForTask(task: DesignTask | null, text: string)
   });
 }
 
+function compactText(value: unknown, maxLength = 260) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function compactJson(value: unknown, maxLength = 700) {
+  if (!value) return "";
+  try {
+    const text = JSON.stringify(value);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+  } catch {
+    return compactText(String(value), maxLength);
+  }
+}
+
+async function buildTransferableContext(params: {
+  conversation: {
+    id: string;
+    shared_brand_context: Prisma.JsonValue | null;
+    project_memory: Prisma.JsonValue | null;
+  };
+  activeTask?: DesignTask | null;
+  targetTask?: DesignTask | null;
+  history: Message[];
+}) {
+  const tasks = await prisma.designTask.findMany({
+    where: { conversation_id: params.conversation.id },
+    orderBy: [{ last_activity_at: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
+    take: 8,
+  });
+  const taskLines = tasks
+    .filter((task) => task.id !== params.targetTask?.id)
+    .map((task) => {
+      const inputs = customerInputsText(task.collected_data, 3);
+      const summary = cleanTaskSummary(task.summary);
+      const data = compactJson(valueToRecord(task.collected_data), 420);
+      return [
+        `- ${taskDisplayName(task.task_type)} (${task.task_type})`,
+        summary ? `  摘要：${summary}` : "",
+        inputs ? `  客戶曾提供：${inputs}` : "",
+        data && !inputs ? `  已收集資料：${data}` : "",
+      ].filter(Boolean).join("\n");
+    })
+    .filter(Boolean)
+    .join("\n");
+  const recentUserLines = params.history
+    .filter((message) => message.role === MessageRole.user)
+    .slice(-8)
+    .map((message) => `- ${compactText(messageContentToText(message), 180)}`)
+    .filter((line) => line !== "-")
+    .join("\n");
+  const sharedBrand = compactJson(params.conversation.shared_brand_context, 700);
+  const projectMemory = compactJson(params.conversation.project_memory, 900);
+  const activeLine = taskSwitchContextLine(params.activeTask);
+  const context = [
+    sharedBrand ? `共用品牌資料：${sharedBrand}` : "",
+    projectMemory ? `專案記憶：${projectMemory}` : "",
+    activeLine ? `原任務狀態：${activeLine}` : "",
+    taskLines ? `同一對話中其他任務可沿用資訊：\n${taskLines}` : "",
+    recentUserLines ? `最近客戶明確說過的內容：\n${recentUserLines}` : "",
+  ].filter(Boolean).join("\n\n");
+  return context;
+}
+
+async function carryContextIntoTask(params: {
+  task: DesignTask;
+  context: string;
+  switchedFromTask?: DesignTask | null;
+}) {
+  if (!params.context.trim()) return params.task;
+  const collected = valueToRecord(params.task.collected_data);
+  const existingMemory = valueToRecord(collected.transferContext);
+  const currentGoal = valueToRecord(params.task.current_clarification_goal);
+  return prisma.designTask.update({
+    where: { id: params.task.id },
+    data: {
+      collected_data: {
+        ...collected,
+        transferContext: {
+          ...existingMemory,
+          fromTaskId: params.switchedFromTask?.id ?? existingMemory.fromTaskId ?? null,
+          fromTaskType: params.switchedFromTask?.task_type ?? existingMemory.fromTaskType ?? null,
+          summary: params.context.slice(0, 2400),
+          updatedAt: new Date().toISOString(),
+        },
+      } as Prisma.InputJsonValue,
+      current_clarification_goal: {
+        ...currentGoal,
+        transferredContextSummary: params.context.slice(0, 1400),
+      } as Prisma.InputJsonValue,
+      last_activity_at: new Date(),
+    },
+  });
+}
+
 function buildStepDecision(params: {
   taskType?: string | null;
   taskId?: string | null;
   canGenerate: boolean;
   needsUserInput: boolean;
   clarificationCount?: number;
-  nextActions?: Array<{ label: string; value?: string; action?: string }>;
+  nextActions?: Array<{ label: string; value?: string; action?: string; taskId?: string | null }>;
 }) {
   const g3Step = g3FlowStep(params.clarificationCount ?? 0, params.canGenerate);
   const nextActions =
     params.nextActions ??
     (params.canGenerate
-      ? [{ label: "產生第一版", action: "proceed_generate", value: "產生第一版" }]
+      ? [{ label: "產生第一版", action: "proceed_generate", value: "產生第一版", taskId: params.taskId ?? null }]
       : []);
 
   return {
@@ -272,6 +377,41 @@ function buildStepDecision(params: {
   };
 }
 
+function buildStreamingProgressMetadata(params: {
+  task?: DesignTask | null;
+  stageLabel: string;
+  stageDescription: string;
+  phase?: string;
+}) {
+  const stepDecision = buildStepDecision({
+    taskType: params.task?.task_type,
+    taskId: params.task?.id,
+    clarificationCount: params.task?.clarification_count ?? 0,
+    canGenerate: false,
+    needsUserInput: false,
+    nextActions: [],
+  });
+  return {
+    source: "conversations.messages.streaming",
+    status: "streaming",
+    phase: params.phase ?? "progress",
+    activeDesignTaskId: params.task?.id ?? null,
+    stepDecision: {
+      ...stepDecision,
+      phase: "processing",
+      action: "progress",
+      mode: "progress",
+      stageLabel: params.stageLabel,
+      stageDescription: params.stageDescription,
+      shouldShowProgress: true,
+      needsUserInput: false,
+      canGenerate: false,
+      nextActions: [],
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
 function bodyQuickReply(body: Record<string, unknown>) {
   const metadata = body.metadata && typeof body.metadata === "object"
     ? (body.metadata as Record<string, unknown>)
@@ -281,82 +421,157 @@ function bodyQuickReply(body: Record<string, unknown>) {
     : null;
 }
 
+function taskDisplayName(taskType: DesignTaskType | string | null | undefined) {
+  switch (taskType) {
+    case "logo":
+      return "品牌 Logo 設計";
+    case "vi":
+      return "品牌識別系統";
+    case "brand_guideline":
+      return "品牌標準手冊";
+    case "business_card":
+      return "名片設計";
+    case "dm":
+      return "DM / 傳單設計";
+    case "poster":
+      return "海報設計";
+    case "catalog":
+      return "型錄設計";
+    case "menu":
+      return "菜單設計";
+    case "packaging":
+      return "包裝設計";
+    case "social_post":
+      return "社群圖片設計";
+    case "banner":
+      return "橫幅設計";
+    case "edm":
+      return "EDM 設計";
+    case "brand_website":
+      return "品牌官網";
+    case "landing_page":
+      return "一頁式網站";
+    case "ecommerce_website":
+      return "電商網站";
+    case "social_copy":
+      return "社群文案";
+    case "seo_article":
+      return "SEO 文章";
+    case "website_audit":
+      return "網站健檢";
+    case "annual_marketing_strategy":
+      return "年度行銷策略";
+    case "ads_strategy":
+      return "廣告投放策略";
+    default:
+      return "新的任務";
+  }
+}
+
+function taskSwitchContextLine(task: DesignTask | null | undefined) {
+  if (!task) return "";
+  const summary = cleanTaskSummary(task.summary);
+  if (summary) return `目前「${taskDisplayName(task.task_type)}」已整理到：${summary}`;
+  const collected =
+    task.collected_data && typeof task.collected_data === "object" && !Array.isArray(task.collected_data)
+      ? Object.values(task.collected_data as Record<string, unknown>)
+          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .filter(Boolean)
+          .slice(0, 2)
+          .join("、")
+      : "";
+  return collected ? `目前「${taskDisplayName(task.task_type)}」已有資料：${collected}` : "";
+}
+
+function quickReplyTaskType(body: Record<string, unknown>) {
+  const quickReply = bodyQuickReply(body);
+  return parseDesignTaskType(quickReply?.taskType);
+}
+
+function isConfirmedTaskSwitch(body: Record<string, unknown>) {
+  const quickReply = bodyQuickReply(body);
+  return quickReply?.action === "confirm_task_switch";
+}
+
+function shouldConfirmTaskSwitch(params: {
+  activeTask?: Awaited<ReturnType<typeof findConversationActiveTask>> | null;
+  inferredIntent?: UserIntentResult | null;
+  body: Record<string, unknown>;
+}) {
+  if (!params.activeTask) return null;
+  if (isConfirmedTaskSwitch(params.body)) return null;
+  const quickReply = bodyQuickReply(params.body);
+  if (typeof quickReply?.taskId === "string") return null;
+  if (typeof params.body.designTaskId === "string") return null;
+  const confirmedSwitchTaskType = isConfirmedTaskSwitch(params.body)
+    ? quickReplyTaskType(params.body)
+    : null;
+  const inferredTaskType = confirmedSwitchTaskType || parseDesignTaskType(params.inferredIntent?.taskType);
+  if (!inferredTaskType || inferredTaskType === params.activeTask.task_type) return null;
+  const action = params.inferredIntent?.action;
+  const shouldGate =
+    params.inferredIntent?.wantsGeneration === true ||
+    action === "generate" ||
+    action === "create_new" ||
+    action === "refine";
+  return shouldGate ? inferredTaskType : null;
+}
+
 function conversationProjectMemory(conversation: { project_memory: Prisma.JsonValue | null }) {
   return conversation.project_memory && typeof conversation.project_memory === "object" && !Array.isArray(conversation.project_memory)
     ? (conversation.project_memory as Record<string, unknown>)
     : {};
 }
 
-function hintedTaskTypeFromText(text: string): DesignTaskType | null {
-  const candidates: Array<{ taskType: DesignTaskType; hints: string[] }> = [
-    { taskType: DesignTaskType.logo, hints: ["logo", "Logo", "LOGO", "品牌標誌", "品牌Logo", "商標", "字標"] },
-    { taskType: DesignTaskType.vi, hints: ["VI", "vi", "品牌識別", "識別系統"] },
-    { taskType: DesignTaskType.brand_guideline, hints: ["品牌手冊", "品牌標準", "品牌規範", "guideline"] },
-    { taskType: DesignTaskType.business_card, hints: ["名片", "business card"] },
-    { taskType: DesignTaskType.dm, hints: ["DM", "dm", "傳單", "摺頁"] },
-    { taskType: DesignTaskType.poster, hints: ["海報", "poster"] },
-    { taskType: DesignTaskType.catalog, hints: ["型錄", "產品型錄", "catalog"] },
-    { taskType: DesignTaskType.menu, hints: ["菜單", "menu", "餐牌"] },
-    { taskType: DesignTaskType.packaging, hints: ["包裝", "包裝設計"] },
-    { taskType: DesignTaskType.social_post, hints: ["社群圖", "貼文圖", "社群貼文圖"] },
-    { taskType: DesignTaskType.banner, hints: ["banner", "橫幅", "廣告圖"] },
-    { taskType: DesignTaskType.edm, hints: ["EDM", "edm", "電子報"] },
-    { taskType: DesignTaskType.social_copy, hints: ["社群文案", "貼文文案", "小編文案", "IG文案", "FB文案"] },
-    { taskType: DesignTaskType.seo_article, hints: ["SEO文章", "seo文章", "部落格文章", "行銷文章", "文章"] },
-    { taskType: DesignTaskType.ads_strategy, hints: ["廣告策略", "投放策略", "廣告企劃"] },
-    { taskType: DesignTaskType.annual_marketing_strategy, hints: ["年度行銷", "行銷策略", "行銷企劃"] },
-  ];
-  return candidates.find((candidate) => candidate.hints.some((hint) => text.includes(hint)))?.taskType ?? null;
+const WEBSITE_BUILDER_ACTIONS = [
+  "website_select_intent",
+  "website_continue_collecting",
+  "website_skip_field",
+  "website_ai_assist",
+  "website_generate",
+  "website_upload_files",
+  "website_edit",
+  "website_view_code",
+  "website_new",
+  "website_restart",
+  "website_edit_products",
+  "website_add_product",
+];
+
+function isWebsiteTaskType(taskType: DesignTaskType | string | null | undefined) {
+  return (
+    taskType === "brand_website" ||
+    taskType === "landing_page" ||
+    taskType === "ecommerce_website"
+  );
 }
 
-function isFreshTaskRequest(text: string) {
-  const hints = ["新的", "重新", "重做", "再開", "另一個", "另外一個", "從頭", "不要沿用"];
-  return hints.some((hint) => text.includes(hint));
-}
-
-function shouldEscapeWebsiteBuilderForTask(text: string, action: string) {
-  if (action.startsWith("website_")) return false;
-  const hintedTaskType = hintedTaskTypeFromText(text);
-  if (!hintedTaskType) return false;
-  const websiteTaskTypes: DesignTaskType[] = [
-    DesignTaskType.brand_website,
-    DesignTaskType.landing_page,
-    DesignTaskType.ecommerce_website,
-  ];
-  return !websiteTaskTypes.includes(hintedTaskType);
+function hasExplicitWebsiteAction(body: Record<string, unknown>) {
+  const quickReply = bodyQuickReply(body);
+  const action = typeof quickReply?.action === "string" ? quickReply.action : "";
+  return WEBSITE_BUILDER_ACTIONS.includes(action);
 }
 
 function isWebsiteBuilderRequest(params: {
   text: string;
   body: Record<string, unknown>;
   conversation: { project_memory: Prisma.JsonValue | null };
+  activeTask?: { task_type: string } | null;
 }) {
   const quickReply = bodyQuickReply(params.body);
   const action = typeof quickReply?.action === "string" ? quickReply.action : "";
-  const websiteActions = [
-    "website_select_intent",
-    "website_continue_collecting",
-    "website_skip_field",
-    "website_ai_assist",
-    "website_generate",
-    "website_upload_files",
-    "website_edit",
-    "website_view_code",
-    "website_new",
-    "website_restart",
-    "website_edit_products",
-    "website_add_product",
-  ];
   const projectMemory = conversationProjectMemory(params.conversation);
   const websiteBuilder =
     projectMemory.websiteBuilder && typeof projectMemory.websiteBuilder === "object"
       ? (projectMemory.websiteBuilder as Record<string, unknown>)
       : {};
-  if (websiteBuilder.kind === "website_builder" && shouldEscapeWebsiteBuilderForTask(params.text, action)) {
-    return false;
-  }
+  const activeTaskIsWebsite = isWebsiteTaskType(params.activeTask?.task_type);
   return (
-    websiteActions.includes(action) ||
+    WEBSITE_BUILDER_ACTIONS.includes(action) ||
+    (activeTaskIsWebsite &&
+      (action === "proceed_generate" ||
+        action === "choose_direction" ||
+        routeWebsiteKind(params.text) === "website_builder")) ||
     websiteBuilder.kind === "website_builder" ||
     routeWebsiteKind(params.text) === "website_builder"
   );
@@ -504,6 +719,66 @@ function generationSourceMessageId(body: Record<string, unknown>) {
   return quickReplySource || bodyTargetGeneration(body);
 }
 
+function generationSourceVersionNumber(body: Record<string, unknown>) {
+  const metadata = body.metadata && typeof body.metadata === "object"
+    ? (body.metadata as Record<string, unknown>)
+    : {};
+  const target = metadata.targetGeneration && typeof metadata.targetGeneration === "object"
+    ? (metadata.targetGeneration as Record<string, unknown>)
+    : null;
+  const version = Number(target?.versionNumber);
+  return Number.isFinite(version) && version > 0 ? version : null;
+}
+
+async function taskIdFromQuickReplySource(conversationId: string, body: Record<string, unknown>) {
+  const sourceMessageId = generationSourceMessageId(body);
+  if (!sourceMessageId) return null;
+  const sourceMessage = await prisma.message.findFirst({
+    where: { id: sourceMessageId, conversation_id: conversationId },
+    select: { design_task_id: true, metadata: true },
+  });
+  if (!sourceMessage) return null;
+  if (sourceMessage.design_task_id) return sourceMessage.design_task_id;
+
+  const metadata =
+    sourceMessage.metadata && typeof sourceMessage.metadata === "object" && !Array.isArray(sourceMessage.metadata)
+      ? (sourceMessage.metadata as Record<string, unknown>)
+      : {};
+  const activeDesignTaskId = metadata.activeDesignTaskId;
+  if (typeof activeDesignTaskId === "string" && activeDesignTaskId.trim()) return activeDesignTaskId.trim();
+
+  const stepDecision =
+    metadata.stepDecision && typeof metadata.stepDecision === "object" && !Array.isArray(metadata.stepDecision)
+      ? (metadata.stepDecision as Record<string, unknown>)
+      : {};
+  const targetTaskId = stepDecision.targetTaskId;
+  if (typeof targetTaskId === "string" && targetTaskId.trim()) return targetTaskId.trim();
+  return null;
+}
+
+async function findReusableTaskByType(params: {
+  conversationId: string;
+  userId: string;
+  taskType: DesignTaskType;
+}) {
+  return prisma.designTask.findFirst({
+    where: {
+      conversation_id: params.conversationId,
+      user_id: params.userId,
+      task_type: params.taskType,
+      status: {
+        in: [
+          DesignTaskStatus.active,
+          DesignTaskStatus.collecting,
+          DesignTaskStatus.paused,
+          DesignTaskStatus.completed,
+        ],
+      },
+    },
+    orderBy: [{ last_activity_at: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
+  });
+}
+
 function isGenerateRequest(params: { text: string; body: Record<string, unknown> }) {
   const quickReply = bodyQuickReply(params.body);
   const action = typeof quickReply?.action === "string" ? quickReply.action : "";
@@ -515,23 +790,22 @@ function isDelegatingToAi(params: { text: string; body: Record<string, unknown> 
   const quickReply = bodyQuickReply(params.body);
   const action = typeof quickReply?.action === "string" ? quickReply.action : "";
   if (action === "ask_ai_recommendation" || action === "use_placeholder") return true;
-  const text = params.text;
-  const hints = [
-    "不知道",
-    "不確定",
-    "沒想法",
-    "你決定",
-    "你建議",
-    "幫我決定",
-    "先建議",
-    "整理建議",
-    "資料還不完整",
-    "資料不完整",
-    "給我幾個方向",
-    "參考靈感",
-    "方向讓我挑",
-  ];
-  return hints.some((hint) => text.includes(hint));
+  return false;
+}
+
+function isChoosingDirection(params: { body: Record<string, unknown> }) {
+  const quickReply = bodyQuickReply(params.body);
+  return quickReply?.action === "choose_direction";
+}
+
+function bodyMetadata(body: Record<string, unknown>) {
+  return body.metadata && typeof body.metadata === "object"
+    ? (body.metadata as Record<string, unknown>)
+    : {};
+}
+
+function bodyBooleanFlag(body: Record<string, unknown>, key: string) {
+  return bodyMetadata(body)[key] === true;
 }
 
 function buildFlowInstruction(params: {
@@ -542,9 +816,11 @@ function buildFlowInstruction(params: {
   if (!params.task) return "";
   const currentStep = g3FlowStep(params.task.clarification_count);
   const shouldGenerate = isGenerateRequest({ text: params.text, body: params.body });
+  const shouldFinalizeDirection = isChoosingDirection({ body: params.body });
   const shouldRecommend =
-    isDelegatingToAi({ text: params.text, body: params.body }) ||
-    params.task.clarification_count >= 4;
+    !shouldFinalizeDirection &&
+    (isDelegatingToAi({ text: params.text, body: params.body }) ||
+      params.task.clarification_count >= 4);
 
   if (shouldGenerate) {
     return [
@@ -565,8 +841,20 @@ function buildFlowInstruction(params: {
       "- 這一輪不是生成交付，不可宣稱已經產生圖像、網站、文案成品，也不可輸出像最終交付物的完整結果。",
       "- 如果已取得搜尋或參考資料，先用那些資料整理 2 到 4 個方向，讓客戶知道你不是憑空猜。",
       "- 若是設計任務，請提供風格＋參考平台/圖片方向讓客戶挑，例如 Pinterest（日系、韓系、情境感）、Behance（美式商業風格）、Dribbble（歐美 UI 科技風）、Freepik（模板商業風格）。",
+      "- 若是 SEO 文章或社群文案任務，請提供文章切角、目標讀者、內容重點與 CTA 方向；不要稱為 brief，也不要輸出寫手指示。",
       "- 可以列 2 到 4 個可選方向，但每個方向必須能直接往第一版推進。",
       "- 結尾要明確告訴使用者：可以直接選一個方向，或按產生第一版。",
+    ].join("\n");
+  }
+
+  if (shouldFinalizeDirection) {
+    return [
+      "# 目前使用者已選定方向",
+      "- 這一輪是收斂完成，不是重新開新問題。",
+      "- 不要再問橫式/直式、不要再列下一組風格方向、不要再做補充問卷。",
+      "- 如果還缺版型、構圖或細節，請用你的專業直接決定最穩的第一版設定。",
+      "- 回覆要簡短：確認已採用的品牌名與方向，列出 3 到 5 個第一版生成設定。",
+      "- 結尾只提示可以按「產生第一版」，不要再要求使用者先回答下一題。",
     ].join("\n");
   }
 
@@ -590,12 +878,120 @@ function jsonSummary(value: unknown) {
   }
 }
 
+function textFromGenerationGroups(groups: unknown[], sourceVersionNumber?: number | null) {
+  const candidates = groups
+    .map((group) => (group && typeof group === "object" && !Array.isArray(group) ? (group as Record<string, unknown>) : null))
+    .filter((group): group is Record<string, unknown> => Boolean(group))
+    .filter((group) => {
+      if (!sourceVersionNumber) return true;
+      return Number(group.versionNumber) === sourceVersionNumber;
+    });
+  const group = candidates[candidates.length - 1];
+  const items = Array.isArray(group?.items) ? group.items : [];
+  const text = items
+    .map((item) => {
+      const record = item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
+      return typeof record.content === "string" ? record.content : "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+  return text.length > 6000 ? `${text.slice(0, 6000)}\n\n（前版內容已截斷，請保留其餘未被要求修改的結構與語氣。）` : text;
+}
+
+function textDeliverableInstruction(taskType: string) {
+  switch (taskType) {
+    case "seo_article":
+      return [
+        "交付物必須是完整 SEO 文章正文，不是 SEO brief、文章架構、需求整理或寫手指示。",
+        "請直接輸出可貼到網站或部落格的文章成品，至少包含：H1 標題、Meta Title、Meta Description、開場段、4 到 6 個 H2 章節、每個章節的實際段落內容、FAQ、CTA 或結語。",
+        "如果品牌、產品、地區或關鍵字不足，請用合理假設自然帶入正文；可以在開頭用一句話標註假設，但不可要求使用者再提供主題才能開始。",
+        "禁止輸出「SEO 文章設計 brief」、「第一版執行 brief」、「下一步怎麼做」、「請給我主題」、「之後把某某換掉」、「適合交給寫手」這類規劃語句。",
+      ].join("\n");
+    case "social_copy":
+      return [
+        "交付物必須是可直接發布的社群文案組，不是文案 brief 或方向建議。",
+        "請輸出多則完整貼文文案、標題、CTA、hashtag 與可搭配的視覺建議；缺資料時用合理假設補齊。",
+      ].join("\n");
+    case "marketing_plan":
+    case "marketing_strategy":
+      return [
+        "交付物必須是可執行的行銷方案，不是需求整理或下一步建議。",
+        "請輸出目標、策略、執行步驟、渠道配置、素材方向、衡量指標與時程；缺資料時用合理假設補齊。",
+      ].join("\n");
+    default:
+      return [
+        "交付物必須是可直接使用的完整第一版成品，不是 brief、需求整理、大綱或下一步建議。",
+        "缺資料時用合理假設補齊並直接完成，不要把問題丟回給使用者。",
+      ].join("\n");
+  }
+}
+
 async function createGenerationResult(params: {
   conversationId: string;
   task: NonNullable<Awaited<ReturnType<typeof resolveRequestedTask>>>;
   model: string;
+  providerConfig?: FlexionRequest["providerConfig"];
+  creditMultiplier?: number;
   instruction: string;
   sourceMessageId?: string | null;
+  sourceVersionNumber?: number | null;
+}) {
+  const domain = resolveTaskDomain(params.task.task_type);
+
+  if (domain === "image") {
+    const dispatched = await dispatchImageGeneration({
+      conversationId: params.conversationId,
+      userId: params.task.user_id,
+      task: params.task,
+      instruction: params.instruction,
+      sourceMessageId: params.sourceMessageId,
+      sourceVersionNumber: params.sourceVersionNumber,
+    });
+    if (dispatched) {
+      return {
+        updatedTask: dispatched.task,
+        message: dispatched.message,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        credits: dispatched.credits,
+      };
+    }
+  }
+
+  if (domain === "text") {
+    const dispatched = await dispatchTextGeneration({
+      conversationId: params.conversationId,
+      task: params.task,
+      model: params.model,
+      providerConfig: params.providerConfig,
+      creditMultiplier: params.creditMultiplier,
+      instruction: params.instruction,
+      sourceMessageId: params.sourceMessageId,
+      sourceVersionNumber: params.sourceVersionNumber,
+      source: "conversations.messages.auto-generate",
+    });
+    if (dispatched) {
+      return {
+        updatedTask: dispatched.task,
+        message: dispatched.message,
+        usage: dispatched.usage,
+        credits: dispatched.credits,
+      };
+    }
+  }
+
+  // Fallback (web / unknown domain) — keep the legacy inline path below.
+  return legacyCreateGenerationResult(params);
+}
+
+async function legacyCreateGenerationResult(params: {
+  conversationId: string;
+  task: NonNullable<Awaited<ReturnType<typeof resolveRequestedTask>>>;
+  model: string;
+  providerConfig?: FlexionRequest["providerConfig"];
+  creditMultiplier?: number;
+  instruction: string;
+  sourceMessageId?: string | null;
+  sourceVersionNumber?: number | null;
 }) {
   const schema = await getSchema(params.task.task_type);
   const executionStrategy =
@@ -603,6 +999,21 @@ async function createGenerationResult(params: {
     resolveDefaultExecutionStrategy(params.task.task_type);
   const domain = resolveTaskDomain(params.task.task_type);
   const isImageTask = domain === "image";
+  const existingMessage = await prisma.message.findFirst({
+    where: {
+      conversation_id: params.conversationId,
+      design_task_id: params.task.id,
+      message_type: MessageType.generation_result,
+    },
+    orderBy: { created_at: "asc" },
+  });
+  const existingMetadata = existingMessage?.metadata && typeof existingMessage.metadata === "object" && !Array.isArray(existingMessage.metadata)
+    ? (existingMessage.metadata as Record<string, unknown>)
+    : {};
+  const existingGroups = Array.isArray(existingMetadata.outputGroups) ? existingMetadata.outputGroups : [];
+  const sourceText = !isImageTask && existingGroups.length > 0
+    ? textFromGenerationGroups(existingGroups, params.sourceVersionNumber)
+    : "";
 
   if (isImageTask) {
     const dispatched = await dispatchImageGeneration({
@@ -611,6 +1022,7 @@ async function createGenerationResult(params: {
       task: params.task,
       instruction: params.instruction,
       sourceMessageId: params.sourceMessageId,
+      sourceVersionNumber: params.sourceVersionNumber,
     });
     if (dispatched) {
       return {
@@ -630,7 +1042,10 @@ async function createGenerationResult(params: {
     `需求資料：${jsonSummary(params.task.collected_data)}`,
     `已解析需求：${jsonSummary(params.task.resolved_requirements)}`,
     `缺少需求：${jsonSummary(params.task.missing_requirements)}`,
+    params.sourceVersionNumber ? `本輪是針對第 ${params.sourceVersionNumber} 版做修改。` : "",
+    sourceText ? `被修改的前版內容：\n${sourceText}` : "",
     params.instruction ? `使用者本輪指令：${params.instruction}` : "",
+    !isImageTask ? `交付物規則：\n${textDeliverableInstruction(params.task.task_type)}` : "",
     isImageTask
       ? [
           "請直接輸出第一版設計提案，定位為 GTL 已經開始產出第一版。",
@@ -639,14 +1054,124 @@ async function createGenerationResult(params: {
           "資訊不足時用合理假設補齊。",
         ].join("\n")
       : [
-          "請直接輸出第一版成果，不要反問。",
-          "資訊不足時用合理假設補齊，並清楚標註假設。",
+          sourceText
+            ? "請輸出修正版完整成品。必須保留前版中使用者沒有要求修改的結構、語氣、段落與重點，只套用本輪指令要求的變更；不可改寫成 brief 或重新規劃。"
+            : "請直接輸出第一版完整成品，不要反問。",
+          "資訊不足時用合理假設補齊，並清楚標註假設；不可輸出 brief、架構、大綱或下一步建議。",
         ].join("\n"),
   ]
     .filter(Boolean)
     .join("\n\n");
 
-  const result = await flexionComplete({
+  const versionNumber = Math.max(
+    0,
+    Number(existingMetadata.versionNumber) || 0,
+    ...existingGroups.map((group) => {
+      const record = group && typeof group === "object" && !Array.isArray(group) ? (group as Record<string, unknown>) : {};
+      const version = Number(record.versionNumber);
+      return Number.isFinite(version) ? version : 0;
+    }),
+  ) + 1;
+  const generationId = randomUUID();
+  const buildOutputGroup = (content: string) => ({
+    kind: "text",
+    title: `第 ${versionNumber} 版內容`,
+    versionNumber,
+    generationId,
+    items: [
+      {
+        id: `${generationId}-text-1`,
+        label: params.task.title,
+        content,
+      },
+    ],
+  });
+  let assembled = "";
+  let usage = { input_tokens: 0, output_tokens: 0 };
+  let completionModel = params.model;
+  let lastPublishedAt = 0;
+  const baseContent = {
+    type: isImageTask ? "image_brief" : "text_document",
+    status: "streaming",
+    taskId: params.task.id,
+    taskType: params.task.task_type,
+    executionStrategy,
+    domain,
+    text: "",
+  };
+  const baseMetadata = {
+    ...existingMetadata,
+    type: "generation_result",
+    source: "conversations.messages.auto-generate",
+    domain,
+    status: "streaming",
+    generationId,
+    taskId: params.task.id,
+    taskType: params.task.task_type,
+    templateKey: params.task.template_key || params.task.task_type,
+    templateLabel: params.task.template_label || params.task.title,
+    versionNumber,
+    sourceMessageId: params.sourceMessageId ?? existingMetadata.sourceMessageId ?? null,
+    parentVersionNumber: params.sourceVersionNumber ?? null,
+    outputGroups: [...existingGroups, buildOutputGroup("")],
+    expectedOutputCount: 1,
+    receivedOutputCount: 0,
+    pendingOutputs: 1,
+  };
+  const sourceMessageForParent = params.sourceMessageId
+    ? await prisma.message.findFirst({
+        where: { id: params.sourceMessageId, conversation_id: params.conversationId },
+        select: { id: true, message_type: true },
+      })
+    : null;
+  const generationParentMessageId =
+    sourceMessageForParent?.message_type === MessageType.generation_result
+      ? await resolveSiblingParentMessageId(params.conversationId, sourceMessageForParent.id)
+      : sourceMessageForParent?.id ?? null;
+
+  let message = await prisma.message.create({
+    data: {
+      conversation_id: params.conversationId,
+      role: MessageRole.assistant,
+      message_type: MessageType.generation_result,
+      design_task_id: params.task.id,
+      content: baseContent,
+      metadata: baseMetadata as Prisma.InputJsonValue,
+      tokens_input: 0,
+      tokens_output: 0,
+      credits_used: BigInt(0),
+      model: params.model,
+      parent_message_id: generationParentMessageId,
+    },
+  });
+  publishConversationEvent(params.conversationId, "message.created", shapeMessage(message));
+
+  const publishStreamingResult = async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastPublishedAt < 320) return;
+    lastPublishedAt = now;
+    message = await prisma.message.update({
+      where: { id: message.id },
+      data: {
+        content: {
+          ...baseContent,
+          text: assembled,
+        },
+        metadata: {
+          ...baseMetadata,
+          outputGroups: [...existingGroups, buildOutputGroup(assembled)],
+        } as Prisma.InputJsonValue,
+      },
+    });
+    publishConversationEvent(params.conversationId, "message.updated", shapeMessage(message));
+    publishConversationEvent(params.conversationId, "generation.result.updated", {
+      messageId: message.id,
+      taskId: params.task.id,
+      status: "streaming",
+    });
+  };
+
+  for await (const evt of flexionStream({
     model: params.model,
     messages: [
       {
@@ -656,11 +1181,22 @@ async function createGenerationResult(params: {
       { role: "user", content: prompt },
     ],
     temperature: 0.55,
-    max_tokens: 1800,
-  });
-  const credits = rawToCredits(result.model, result.usage);
+    max_tokens: domain === "text" ? 5200 : 2200,
+    providerConfig: params.providerConfig,
+  })) {
+    if (evt.type === "token") {
+      assembled += evt.delta;
+      await publishStreamingResult(false);
+    } else if (evt.type === "done") {
+      usage = evt.usage;
+      completionModel = evt.model;
+    }
+  }
+  await publishStreamingResult(true);
+  const credits = rawToCredits(completionModel, usage, params.creditMultiplier);
+  const outputGroup = buildOutputGroup(assembled);
 
-  const [updatedTask, message] = await prisma.$transaction([
+  const [updatedTask, completedMessage] = await prisma.$transaction([
     prisma.designTask.update({
       where: { id: params.task.id },
       data: {
@@ -670,52 +1206,78 @@ async function createGenerationResult(params: {
         last_activity_at: new Date(),
       },
     }),
-    prisma.message.create({
-      data: {
-        conversation_id: params.conversationId,
-        role: MessageRole.assistant,
-        message_type: MessageType.generation_result,
-        design_task_id: params.task.id,
-        content: {
-          type: isImageTask ? "image_brief" : "text_document",
-          status: "completed",
-          taskId: params.task.id,
-          taskType: params.task.task_type,
-          executionStrategy,
-          domain,
-          text: result.text,
-        },
-        metadata: {
-          source: "conversations.messages.auto-generate",
-          domain,
-          quickActions: [
-            {
-              label: "調整方向",
-              value: "我想調整方向：",
-              action: "provide_core_info",
+    prisma.message.update({
+          where: { id: message.id },
+          data: {
+            content: {
+              type: isImageTask ? "image_brief" : "text_document",
+              status: "completed",
               taskId: params.task.id,
+              taskType: params.task.task_type,
+              executionStrategy,
+              domain,
+              text: assembled,
             },
-            {
-              label: "補充參考",
-              value: "補充參考：",
-              action: "provide_core_info",
+            metadata: {
+              ...existingMetadata,
+              type: "generation_result",
+              source: "conversations.messages.auto-generate",
+              domain,
+              status: "completed",
+              generationId,
               taskId: params.task.id,
-            },
-          ],
-        } as Prisma.InputJsonValue,
-        tokens_input: result.usage.input_tokens,
-        tokens_output: result.usage.output_tokens,
-        credits_used: credits,
-        model: result.model,
-      },
-    }),
+              taskType: params.task.task_type,
+              templateKey: params.task.template_key || params.task.task_type,
+              templateLabel: params.task.template_label || params.task.title,
+              versionNumber,
+              sourceMessageId: params.sourceMessageId ?? existingMetadata.sourceMessageId ?? null,
+              parentVersionNumber: params.sourceVersionNumber ?? null,
+              outputGroups: [...existingGroups, outputGroup],
+              expectedOutputCount: 1,
+              receivedOutputCount: 1,
+              pendingOutputs: 0,
+              quickActions: [
+                // {
+                //   type: "regenerate_design",
+                //   label: "再生一版",
+                //   value: "再生一版，方向調整為：",
+                //   action: "proceed_generate",
+                //   taskId: params.task.id,
+                //   sourceMessageId: message.id,
+                // },
+                // {
+                //   label: "調整內容",
+                //   value: "我想調整內容：",
+                //   action: "provide_core_info",
+                //   taskId: params.task.id,
+                //   sourceMessageId: message.id,
+                // },
+              ],
+            } as Prisma.InputJsonValue,
+            tokens_input: usage.input_tokens,
+            tokens_output: usage.output_tokens,
+            credits_used: credits,
+            model: completionModel,
+          },
+        }),
     prisma.conversation.update({
       where: { id: params.conversationId },
-      data: { last_message_at: new Date(), active_design_task_id: params.task.id },
+      data: {
+        last_message_at: new Date(),
+        active_design_task_id: params.task.id,
+        active_leaf_message_id: message.id,
+      },
     }),
   ]);
 
-  return { updatedTask, message, usage: result.usage, credits };
+  publishConversationEvent(params.conversationId, "message.completed", shapeMessage(completedMessage));
+  publishConversationEvent(params.conversationId, "generation.result.completed", {
+    messageId: completedMessage.id,
+    taskId: params.task.id,
+    status: "completed",
+  });
+
+  return { updatedTask, message: completedMessage, usage, credits };
 }
 
 function buildOpeningReply(taskType: string | null | undefined) {
@@ -777,8 +1339,12 @@ function choiceLabel(content: string) {
   return text || content.slice(0, 18);
 }
 
-function buildChoiceQuickActions(text: string, taskId: string | null | undefined) {
-  const choices = text
+function buildChoiceQuickActions(params: {
+  text: string;
+  taskId: string | null | undefined;
+  canGenerate: boolean;
+}) {
+  const choices = params.text
     .split("\n")
     .map(numberedChoice)
     .filter((choice): choice is { marker: string; content: string } => Boolean(choice))
@@ -786,11 +1352,19 @@ function buildChoiceQuickActions(text: string, taskId: string | null | undefined
   if (choices.length < 2) return [];
   return choices.map((choice) => {
     const label = choiceLabel(choice.content);
+    if (params.canGenerate) {
+      return {
+        label,
+        value: `我想選「${label}」這個方向，請直接產生第一版。`,
+        action: "proceed_generate",
+        taskId: params.taskId,
+      };
+    }
     return {
       label,
-      value: `我想選「${label}」這個方向，請接著幫我收斂成可執行的設計 brief。`,
+      value: `我想選「${label}」這個方向，請接著幫我收斂成可直接產生第一版的方向。`,
       action: "choose_direction",
-      taskId,
+      taskId: params.taskId,
     };
   });
 }
@@ -821,6 +1395,23 @@ async function findConversationActiveTask(conversationId: string, userId: string
   });
 }
 
+function intentOutputCount(intent?: UserIntentResult | null) {
+  const count = intent?.outputCount;
+  return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.min(Math.floor(count), 4) : null;
+}
+
+async function applyIntentOutputCount(
+  task: DesignTask | null,
+  intent?: UserIntentResult | null,
+): Promise<DesignTask | null> {
+  const count = intentOutputCount(intent);
+  if (!task || !count || resolveTaskDomain(task.task_type) !== "image" || task.output_count === count) return task;
+  return prisma.designTask.update({
+    where: { id: task.id },
+    data: { output_count: count, last_activity_at: new Date() },
+  });
+}
+
 async function createDesignTaskForType(params: {
   conversationId: string;
   userId: string;
@@ -840,6 +1431,7 @@ async function createDesignTaskForType(params: {
       execution_strategy: resolved.executionStrategy,
       title: getTaskTitle(resolved.taskType, params.body.title),
       status: DesignTaskStatus.active,
+      output_count: resolveTaskDomain(resolved.taskType) === "image" ? intentOutputCount(params.intent) ?? undefined : undefined,
       collected_data: toInputJson(params.body.collectedData),
       current_clarification_goal: {
         switchedFromTaskId: params.activeTask?.id ?? null,
@@ -866,10 +1458,28 @@ async function resolveRequestedTask(params: {
     : [];
   const quickReply = bodyQuickReply(params.body);
   const quickReplyTaskId = typeof quickReply?.taskId === "string" ? quickReply.taskId : null;
+  const bodyTaskId = typeof params.body.designTaskId === "string" ? params.body.designTaskId : null;
+  const inferredTaskType = parseDesignTaskType(params.inferredIntent?.taskType);
+  const passiveDesignTaskId = designTaskIds[0] || null;
+  const passiveTaskIsCurrentActive =
+    Boolean(passiveDesignTaskId && params.activeTask?.id === passiveDesignTaskId);
+  const passiveTaskConflictsWithIntent =
+    Boolean(
+      inferredTaskType &&
+        passiveTaskIsCurrentActive &&
+        params.activeTask?.task_type &&
+        params.activeTask.task_type !== inferredTaskType,
+    );
+  const sourceTaskId =
+    bodyTaskId || quickReplyTaskId
+      ? null
+      : await taskIdFromQuickReplySource(params.conversationId, params.body);
   const explicitTaskId =
-    typeof params.body.designTaskId === "string"
-      ? params.body.designTaskId
-      : quickReplyTaskId || designTaskIds[0] || null;
+    bodyTaskId ||
+    quickReplyTaskId ||
+    sourceTaskId ||
+    (passiveTaskConflictsWithIntent ? null : passiveDesignTaskId) ||
+    null;
 
   if (explicitTaskId) {
     const task = await prisma.designTask.findFirst({
@@ -877,7 +1487,7 @@ async function resolveRequestedTask(params: {
     });
     if (task) {
       await activateDesignTask(params.conversationId, task.id);
-      return task;
+      return applyIntentOutputCount(task, params.inferredIntent);
     }
   }
 
@@ -898,34 +1508,41 @@ async function resolveRequestedTask(params: {
       },
     });
     await activateDesignTask(params.conversationId, task.id);
-    return task;
+    return applyIntentOutputCount(task, params.inferredIntent);
   }
 
-  const inferredTaskType = parseDesignTaskType(params.inferredIntent?.taskType) || hintedTaskTypeFromText(params.text);
   if (inferredTaskType) {
-    const shouldCreateFresh = isFreshTaskRequest(params.text);
+    const shouldCreateFresh = params.inferredIntent?.action === "create_new";
     if (!shouldCreateFresh && params.activeTask?.task_type === inferredTaskType) {
-      return params.activeTask;
+      return applyIntentOutputCount(params.activeTask, params.inferredIntent);
     }
     if (!shouldCreateFresh) {
       const reusableStatuses = params.inferredIntent?.action === "refine" || params.inferredIntent?.wantsGeneration
         ? [DesignTaskStatus.active, DesignTaskStatus.collecting, DesignTaskStatus.paused, DesignTaskStatus.completed]
         : [DesignTaskStatus.active, DesignTaskStatus.collecting, DesignTaskStatus.paused];
-      const reusableTask = await prisma.designTask.findFirst({
-        where: {
-          conversation_id: params.conversationId,
-          user_id: params.userId,
-          task_type: inferredTaskType,
-          status: { in: reusableStatuses },
-        },
-        orderBy: [{ last_activity_at: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
-      });
+      const reusableTask =
+        params.inferredIntent?.action === "refine" || params.inferredIntent?.wantsGeneration
+          ? await findReusableTaskByType({
+              conversationId: params.conversationId,
+              userId: params.userId,
+              taskType: inferredTaskType,
+            })
+          : await prisma.designTask.findFirst({
+              where: {
+                conversation_id: params.conversationId,
+                user_id: params.userId,
+                task_type: inferredTaskType,
+                status: { in: reusableStatuses },
+              },
+              orderBy: [{ last_activity_at: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
+            });
       if (reusableTask) {
         if (params.activeTask?.id !== reusableTask.id) {
           await activateDesignTask(params.conversationId, reusableTask.id);
-          return prisma.designTask.findUnique({ where: { id: reusableTask.id } });
+          const activatedTask = await prisma.designTask.findUnique({ where: { id: reusableTask.id } });
+          return applyIntentOutputCount(activatedTask, params.inferredIntent);
         }
-        return reusableTask;
+        return applyIntentOutputCount(reusableTask, params.inferredIntent);
       }
     }
 
@@ -951,13 +1568,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       ? Math.min(Math.max(Math.floor(limitParam), 1), 200)
       : 100;
 
-    const messages = await prisma.message.findMany({
-      where: { conversation_id: params.id },
-      orderBy: { created_at: "asc" },
-      take: limit,
-    });
+    const activePath = await loadActivePathMessages(params.id);
+    const messages = activePath.messages.slice(-limit);
 
-    return ok({ docs: messages.map(shapeMessage), totalDocs: messages.length, limit });
+    return ok({
+      docs: messages.map((message) =>
+        shapeMessageWithSiblings(
+          message,
+          activePath.metaById.get(message.id) ?? { count: 1, index: 0, ids: [message.id] },
+        ),
+      ),
+      totalDocs: activePath.messages.length,
+      limit,
+      activeLeafMessageId: activePath.activeLeafMessageId,
+    });
   } catch (err) {
     return handleError(err);
   }
@@ -976,29 +1600,156 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!text) {
       return ok({ skipped: true });
     }
+    const requestMetadata =
+      body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+        ? (body.metadata as Record<string, unknown>)
+        : {};
+    const editOfMessageId =
+      typeof requestMetadata.editOfMessageId === "string" && requestMetadata.editOfMessageId.trim()
+        ? requestMetadata.editOfMessageId.trim()
+        : null;
+
+    let editedUserMessage: Message | null = null;
+    if (editOfMessageId) {
+      const original = await prisma.message.findFirst({
+        where: {
+          id: editOfMessageId,
+          conversation_id: params.id,
+          role: MessageRole.user,
+        },
+      });
+      if (!original) {
+        throw new ApiError("RESOURCE_NOT_FOUND", "Edited message not found");
+      }
+
+      const originalMetadata =
+        original.metadata && typeof original.metadata === "object" && !Array.isArray(original.metadata)
+          ? (original.metadata as Record<string, unknown>)
+          : {};
+      const siblingParentMessageId = await resolveSiblingParentMessageId(params.id, original.id);
+      editedUserMessage = await prisma.message.create({
+        data: {
+          conversation_id: params.id,
+          role: MessageRole.user,
+          message_type: MessageType.ai,
+          content: { type: "text", text },
+          metadata: {
+            ...originalMetadata,
+            ...requestMetadata,
+            source: "conversations.messages.edit",
+            editedFromMessageId: original.id,
+            editedAt: new Date().toISOString(),
+            resubmitted: true,
+            uploadedImageUrls: parsedBody.uploadedImageUrls,
+          } as Prisma.InputJsonValue,
+          design_task_id: original.design_task_id,
+          parent_message_id: siblingParentMessageId,
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: params.id },
+        data: { active_leaf_message_id: editedUserMessage.id },
+      });
+      publishConversationEvent(params.id, "message.created", shapeMessage(editedUserMessage));
+    }
 
     await assertCreditsAvailable(user.id);
-    const shouldHandleWebsiteBuilder = isWebsiteBuilderRequest({ text, body, conversation });
-    const preTaskHistory = shouldHandleWebsiteBuilder
-      ? []
-      : await prisma.message.findMany({
-          where: { conversation_id: params.id },
-          orderBy: { created_at: "asc" },
-          take: 50,
-        });
     const preQuickReply = bodyQuickReply(body);
-    const activeTask = shouldHandleWebsiteBuilder
+    const preQuickReplyAction = typeof preQuickReply?.action === "string" ? preQuickReply.action : "";
+    const isExplicitGenerateQuickReply =
+      preQuickReplyAction === "proceed_generate";
+    const activeTask = await findConversationActiveTask(params.id, user.id);
+    const websiteBuilderCandidate = isWebsiteBuilderRequest({ text, body, conversation, activeTask });
+    const preTaskHistory = await prisma.message.findMany({
+      where: { conversation_id: params.id },
+      orderBy: { created_at: "asc" },
+      take: 50,
+    });
+
+    const sub = await prisma.subscription.findUnique({
+      where: { user_id: user.id },
+      include: { plan: true },
+    });
+    const planCode = sub?.plan.code ?? "free";
+    const requestedModel =
+      typeof body.selectedModel === "string" && body.selectedModel.trim()
+        ? body.selectedModel.trim()
+        : typeof body.model === "string" && body.model.trim()
+          ? body.model.trim()
+          : conversation.ai_model || activeTask?.preferred_model || "";
+    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
+    const model = resolvedModel.model;
+
+    const appendParentMessageId = editedUserMessage
       ? null
-      : await findConversationActiveTask(params.id, user.id);
-    const earlyIntent = shouldHandleWebsiteBuilder
-      ? null
-      : await inferConversationIntent({
-          userMessage: text,
-          recentTurns: buildRecentTurns(preTaskHistory),
-          activeTaskType: activeTask?.task_type ?? null,
-          quickReplyAction: typeof preQuickReply?.action === "string" ? preQuickReply.action : null,
-          model: pickModel({ plan: "free", taskHint: "fast" }),
-        });
+      : await resolveAppendParentMessageId(params.id, conversation.active_leaf_message_id);
+    let userMessage = editedUserMessage ?? await prisma.message.create({
+      data: {
+        conversation_id: params.id,
+        role: MessageRole.user,
+        message_type: MessageType.ai,
+        content: { type: "text", text },
+        metadata: {
+          ...requestMetadata,
+          source: "conversations.messages",
+          activeDesignTaskId: activeTask?.id ?? null,
+          uploadedImageUrls: parsedBody.uploadedImageUrls,
+        } as Prisma.InputJsonValue,
+        design_task_id: activeTask?.id,
+        parent_message_id: appendParentMessageId,
+      },
+    });
+    if (!editedUserMessage) {
+      await prisma.conversation.update({
+        where: { id: params.id },
+        data: { active_leaf_message_id: userMessage.id },
+      });
+      publishConversationEvent(params.id, "message.created", shapeMessage(userMessage));
+    }
+
+    const earlyIntent = await inferConversationIntent({
+      userMessage: text,
+      recentTurns: buildRecentTurns(preTaskHistory),
+      activeTaskType: activeTask?.task_type ?? null,
+      quickReplyAction: preQuickReplyAction || null,
+      model,
+      providerConfig: resolvedModel.providerConfig,
+    });
+    const inferredTaskTypeForRouting = parseDesignTaskType(earlyIntent?.taskType);
+    const shouldHandleWebsiteBuilder =
+      websiteBuilderCandidate &&
+      (hasExplicitWebsiteAction(body) ||
+        !inferredTaskTypeForRouting ||
+        isWebsiteTaskType(inferredTaskTypeForRouting));
+
+    if (!shouldHandleWebsiteBuilder && !isExplicitGenerateQuickReply) {
+      streamingAssistantMessage = await prisma.message.create({
+        data: {
+          conversation_id: params.id,
+          role: MessageRole.assistant,
+          message_type: MessageType.ai,
+          content: { type: "text", text: "" },
+          metadata: buildStreamingProgressMetadata({
+            task: activeTask,
+            stageLabel: "理解需求",
+            stageDescription: "正在判斷這輪要回答、整理還是產生成果",
+          }) as Prisma.InputJsonValue,
+          design_task_id: activeTask?.id,
+          parent_message_id: userMessage.id,
+        },
+      });
+      await prisma.conversation.update({
+        where: { id: params.id },
+        data: { active_leaf_message_id: streamingAssistantMessage.id },
+      });
+      publishConversationEvent(params.id, "message.created", shapeMessage(streamingAssistantMessage));
+    }
+
+    const hiddenSwitchTarget = shouldConfirmTaskSwitch({
+      activeTask,
+      inferredIntent: earlyIntent,
+      body,
+    });
     let task = shouldHandleWebsiteBuilder
       ? null
       : await resolveRequestedTask({
@@ -1010,31 +1761,83 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           activeTask,
         });
     task = await recordCustomerInputForTask(task, text);
+    const switchedTaskThisTurn = Boolean(
+      hiddenSwitchTarget &&
+        activeTask &&
+        task &&
+        task.id !== activeTask.id &&
+        task.task_type === hiddenSwitchTarget,
+    );
+    let transferredContext = "";
 
-    const userMessage = await prisma.message.create({
-      data: {
-        conversation_id: params.id,
-        role: MessageRole.user,
-        message_type: MessageType.ai,
-        content: { type: "text", text },
-        metadata: {
-          ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
-          source: "conversations.messages",
-          activeDesignTaskId: task?.id ?? null,
-          uploadedImageUrls: parsedBody.uploadedImageUrls,
-        } as Prisma.InputJsonValue,
-        design_task_id: task?.id,
-      },
-    });
-    publishConversationEvent(params.id, "message.created", shapeMessage(userMessage));
+    if (switchedTaskThisTurn && task) {
+      transferredContext = await buildTransferableContext({
+        conversation,
+        activeTask,
+        targetTask: task,
+        history: preTaskHistory,
+      });
+      task = await carryContextIntoTask({
+        task,
+        context: transferredContext,
+        switchedFromTask: activeTask,
+      });
+    }
+
+    if (switchedTaskThisTurn && streamingAssistantMessage && task) {
+      streamingAssistantMessage = await prisma.message.update({
+        where: { id: streamingAssistantMessage.id },
+        data: {
+          design_task_id: task.id,
+          metadata: buildStreamingProgressMetadata({
+            task,
+            stageLabel: "切換任務焦點",
+            stageDescription: `已切到${taskDisplayName(task.task_type)}，正在整理可沿用的上下文`,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+      publishConversationEvent(params.id, "message.updated", shapeMessage(streamingAssistantMessage));
+    }
+
+    if (task?.id && task.id !== userMessage.design_task_id) {
+      userMessage = await prisma.message.update({
+        where: { id: userMessage.id },
+        data: {
+          design_task_id: task.id,
+          metadata: {
+            ...(userMessage.metadata && typeof userMessage.metadata === "object" && !Array.isArray(userMessage.metadata)
+              ? (userMessage.metadata as Record<string, unknown>)
+              : {}),
+            activeDesignTaskId: task.id,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      publishConversationEvent(params.id, "message.updated", shapeMessage(userMessage));
+    }
 
     if (shouldHandleWebsiteBuilder) {
+      const rawWebsiteQuickReply = bodyQuickReply(body);
+      const websiteQuickReply =
+        activeTask &&
+        (activeTask.task_type === "brand_website" ||
+          activeTask.task_type === "landing_page" ||
+          activeTask.task_type === "ecommerce_website") &&
+        rawWebsiteQuickReply?.action === "proceed_generate"
+          ? { ...rawWebsiteQuickReply, action: "website_generate" }
+          : rawWebsiteQuickReply;
+      const websiteTransferContext = await buildTransferableContext({
+        conversation,
+        activeTask,
+        history: preTaskHistory,
+      });
       const websiteResult = await handleWebsiteBuilderTurn({
         conversation,
         userId: user.id,
         text,
-        quickReply: bodyQuickReply(body),
+        quickReply: websiteQuickReply,
         uploadedImageUrls: parsedBody.uploadedImageUrls,
+        parentMessageId: userMessage.id,
+        transferContext: websiteTransferContext,
       });
       if (websiteResult.handled && websiteResult.assistantMessage) {
         return NextResponse.json({
@@ -1050,80 +1853,182 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       orderBy: { created_at: "asc" },
       take: 50,
     });
-    const sub = await prisma.subscription.findUnique({
-      where: { user_id: user.id },
-      include: { plan: true },
-    });
-    const planCode = sub?.plan.code ?? "free";
-    const requestedModel =
-      typeof body.selectedModel === "string" && body.selectedModel.trim()
-        ? body.selectedModel.trim()
-        : typeof body.model === "string" && body.model.trim()
-          ? body.model.trim()
-          : conversation.ai_model || task?.preferred_model || "";
-    // Never forward the raw client value: validate against the plan allowlist
-    // and clamp to the plan default on a miss.
-    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
-    const model = resolvedModel.model;
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
       userMessage: text,
       recentTurns: buildRecentTurns(history),
       activeTaskType: task?.task_type ?? null,
       quickReplyAction: typeof quickReply?.action === "string" ? quickReply.action : null,
-      model: pickModel({ plan: planCode, taskHint: "fast" }),
+      model,
+      providerConfig: resolvedModel.providerConfig,
     });
     const { context: taskContext } = await buildTaskContext(task?.id);
     const flowInstruction = buildFlowInstruction({ task, text, body });
-    const taskDomain = task ? resolveTaskDomain(task.task_type) : null;
     const delegatedToAi = isDelegatingToAi({ text, body });
+    const directionChosen = isChoosingDirection({ body });
     const explicitGenerate = isGenerateRequest({ text, body });
+    const chooseDirectionShouldGenerate = false;
+    const suppressGenerateForHiddenSwitch =
+      switchedTaskThisTurn && !isExplicitGenerateQuickReply;
     const forceGenerate =
-      explicitGenerate ||
-      (!delegatedToAi &&
-        (intent?.action === "generate" ||
-          intent?.wantsGeneration === true ||
-          (Boolean(task) && taskDomain === "image" && intent?.action === "refine")));
+      !suppressGenerateForHiddenSwitch &&
+      (explicitGenerate ||
+        chooseDirectionShouldGenerate ||
+        (!delegatedToAi && intent?.action === "generate"));
     const forceRecommendation =
       Boolean(task) &&
       !forceGenerate &&
       (delegatedToAi || (task?.clarification_count ?? 0) >= 4);
-    const openingReply = !forceGenerate && isOpeningTurn({ text, history: preTaskHistory, taskType: task?.task_type, taskId: task?.id })
+    const shouldResearch = !forceGenerate;
+    const openingReply = !switchedTaskThisTurn && !forceGenerate && isOpeningTurn({ text, history: preTaskHistory, taskType: task?.task_type, taskId: task?.id })
       ? buildOpeningReply(task?.task_type)
       : null;
 
     if (forceGenerate && task) {
+      // Both image and text generation now route directly through the
+      // dispatcher. We retire the pre-flight ack message ("收到，我會先用…
+      // 整理成 SEO 文章成果") because the dispatcher already creates a
+      // generation_result message that streams the real output — emitting
+      // the ack on top of it produces two consecutive assistant bubbles.
+      // Discard the streaming placeholder we optimistically created above;
+      // the dispatcher provides its own.
+      if (streamingAssistantMessage) {
+        try {
+          await prisma.message.delete({ where: { id: streamingAssistantMessage.id } });
+          publishConversationEvent(params.id, "message.deleted", { id: streamingAssistantMessage.id });
+        } catch (cleanupError) {
+          console.warn("[conversations/:id/messages] failed to drop ack placeholder:", cleanupError);
+        }
+        streamingAssistantMessage = null;
+      }
       const generated = await createGenerationResult({
         conversationId: params.id,
         task,
         model,
-        instruction: text,
-        sourceMessageId: generationSourceMessageId(body),
+        providerConfig: resolvedModel.providerConfig,
+        creditMultiplier: resolvedModel.creditMultiplier,
+        instruction: chooseDirectionShouldGenerate
+          ? `${text}\n使用者已選定這個方向，請直接產生第一版。`
+          : text,
+        sourceMessageId: bodyTargetGeneration(body) ?? userMessage.id,
+        sourceVersionNumber: bodyTargetGeneration(body) ? generationSourceVersionNumber(body) : null,
       });
       await consumeCredits(user.id, generated.credits);
-      publishConversationEvent(params.id, "message.completed", shapeMessage(generated.message));
+      assistantFinalized = true;
       return NextResponse.json({
         userMessage: shapeMessage(userMessage),
         assistantMessage: shapeMessage(generated.message),
         task: shapeDesignTask(generated.updatedTask),
+        generatedMessage: shapeMessage(generated.message),
         streaming: false,
       });
     }
 
-    let intelligence: MarketingIntelligencePack | null = null;
-    try {
-      intelligence = await marketingIntelligence.maybeResearch({
-        userMessage: forceRecommendation
-          ? `${text}\n請補充可用的設計參考案例、視覺靈感與代表圖。`
-          : text,
-        task,
-        recentTurns: buildRecentTurns(history),
-        forceSearch: forceRecommendation,
-        forceVisualReferences: forceRecommendation,
+    const createStreamingPlaceholder = async (stageLabel = "整理上下文", stageDescription = "正在對齊目前任務與最近對話") => {
+      if (streamingAssistantMessage) return streamingAssistantMessage;
+      streamingAssistantMessage = await prisma.message.create({
+        data: {
+          conversation_id: params.id,
+          role: MessageRole.assistant,
+          message_type: MessageType.ai,
+          content: { type: "text", text: "" },
+          metadata: buildStreamingProgressMetadata({
+            task,
+            stageLabel,
+            stageDescription,
+          }) as Prisma.InputJsonValue,
+          design_task_id: task?.id,
+          model,
+          parent_message_id: userMessage.id,
+        },
       });
-    } catch (error) {
-      console.warn("[conversations/:id/messages] marketing intelligence skipped:", error);
+      await prisma.conversation.update({
+        where: { id: params.id },
+        data: { active_leaf_message_id: streamingAssistantMessage.id },
+      });
+      publishConversationEvent(params.id, "message.created", shapeMessage(streamingAssistantMessage));
+      return streamingAssistantMessage;
+    };
+
+    const updateStreamingProgress = async (stageLabel: string, stageDescription: string, phase = "progress") => {
+      if (!streamingAssistantMessage) return;
+      streamingAssistantMessage = await prisma.message.update({
+        where: { id: streamingAssistantMessage.id },
+        data: {
+          metadata: buildStreamingProgressMetadata({
+            task,
+            stageLabel,
+            stageDescription,
+            phase,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+      publishConversationEvent(params.id, "message.updated", shapeMessage(streamingAssistantMessage));
+    };
+
+    await createStreamingPlaceholder();
+
+    const publishStreamingDraft = async (draft: string) => {
+      if (!streamingAssistantMessage) return;
+      streamingAssistantMessage = await prisma.message.update({
+        where: { id: streamingAssistantMessage.id },
+        data: {
+          content: { type: "text", text: draft },
+          metadata: buildStreamingProgressMetadata({
+            task,
+            stageLabel: "查找資料",
+            stageDescription: "正在查找資料，稍後會接著整理成可讀回覆",
+            phase: "streaming",
+          }) as Prisma.InputJsonValue,
+        },
+      });
+      publishConversationEvent(params.id, "message.delta", {
+        id: streamingAssistantMessage.id,
+        conversation: params.id,
+        conversationId: params.id,
+        role: MessageRole.assistant,
+        messageType: MessageType.ai,
+        content: draft,
+        metadata: streamingAssistantMessage.metadata,
+        designTaskId: task?.id ?? null,
+        createdAt: streamingAssistantMessage.created_at,
+      });
+    };
+
+    // Fire-and-forget marketing intelligence. The main LLM stream below starts
+    // immediately with no marketing context — search runs in parallel, and
+    // when it lands we (a) update the finalized assistant message's metadata
+    // and (b) publish a `marketing.intelligence.ready` SSE event so the
+    // client can graft the citations/visual references onto the message that
+    // already finished rendering. Old behavior was: await 10–30s before the
+    // first token. New behavior: first token in <1s, citations arrive late.
+    const intelligence: MarketingIntelligencePack | null = null;
+    let intelligencePromise: Promise<MarketingIntelligencePack | null> | null = null;
+    if (shouldResearch) {
+      const explicitSearchMode = forceRecommendation || bodyBooleanFlag(body, "enableSearch");
+      if (explicitSearchMode) {
+        await publishStreamingDraft(
+          forceRecommendation
+            ? "我先查一些可用的案例與參考，再整理成好選的方向。\n\n"
+            : "我先查一下可用資料，再把重點整理給你。\n\n",
+        );
+      }
+      intelligencePromise = marketingIntelligence
+        .maybeResearch({
+          userMessage: forceRecommendation
+            ? `${text}\n請補充可用的設計參考案例、視覺靈感與代表圖。`
+            : text,
+          task,
+          recentTurns: buildRecentTurns(history),
+          forceSearch: forceRecommendation || bodyBooleanFlag(body, "enableSearch"),
+          forceVisualReferences: forceRecommendation,
+        })
+        .catch((error) => {
+          console.warn("[conversations/:id/messages] marketing intelligence skipped:", error);
+          return null;
+        });
     }
+    await updateStreamingProgress("整理上下文", "正在整理需求、任務狀態與近期對話");
 
     let assistantText = "";
     let usage = { input_tokens: 0, output_tokens: 0 };
@@ -1132,7 +2037,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (openingReply) {
       assistantText = openingReply;
     } else {
+      await updateStreamingProgress("準備輸出", "模型開始回覆後會直接逐字顯示", "streaming");
       const marketingContext = marketingIntelligence.buildPromptContext(intelligence);
+      const hiddenSwitchInstruction =
+        switchedTaskThisTurn && task && activeTask
+          ? [
+              "# 隱性任務切換規則",
+              `使用者本輪已從「${taskDisplayName(activeTask.task_type)}」自然切到「${taskDisplayName(task.task_type)}」。`,
+              "不要要求使用者確認切換，不要說你正在切換任務，也不要立刻產生成品。",
+              `這個目標任務原本已保存的內容在「目前任務」區塊；必須優先沿用，不可當成全新任務重新問一次。`,
+              transferredContext ? `可沿用上下文：\n${transferredContext}` : "",
+              "請自然承接新任務，主動帶入上面的品牌、產品、主題或限制；不要重問已經在上下文裡出現的品牌名、產品名或明確主題。",
+              "如果資料仍不足，先問新任務最關鍵的一個缺口，或給少量可選方向。",
+              "原本任務已保留，之後使用者切回時再延續原任務。",
+            ].filter(Boolean).join("\n")
+          : "";
       const messages = [
         {
           role: "system" as const,
@@ -1140,6 +2059,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             CONVERSATION_SYSTEM_PROMPT,
             taskContext,
             flowInstruction,
+            hiddenSwitchInstruction,
             marketingContext ? `# 已搜尋的最新市場資訊\n${marketingContext}` : "",
           ]
             .filter(Boolean)
@@ -1148,42 +2068,41 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ...history.map((message) => ({
           role: message.role as "user" | "assistant" | "system" | "tool",
           content: messageContentToText(message),
-        })),
+          })),
       ];
 
-      streamingAssistantMessage = await prisma.message.create({
-        data: {
-          conversation_id: params.id,
-          role: MessageRole.assistant,
-          message_type: MessageType.ai,
-          content: { type: "text", text: "" },
-          metadata: {
-            source: "conversations.messages.streaming",
-            status: "streaming",
-            phase: "streaming",
-            activeDesignTaskId: task?.id ?? null,
-          } as Prisma.InputJsonValue,
-          design_task_id: task?.id,
-          model,
-        },
-      });
-      publishConversationEvent(params.id, "message.created", shapeMessage(streamingAssistantMessage));
-
+      const activeStreamingMessage = streamingAssistantMessage ?? await createStreamingPlaceholder();
       let assembled = "";
+      let tokenCounter = 0;
+      let cancelled = false;
       try {
-        for await (const evt of flexionStream({ model, messages, temperature: 0.35, stream: true, providerConfig: resolvedModel.providerConfig })) {
+        for await (const evt of flexionStream({
+          model,
+          messages,
+          max_tokens: 2200,
+          temperature: 0.35,
+          stream: true,
+          providerConfig: resolvedModel.providerConfig,
+        })) {
           if (evt.type === "token") {
             assembled += evt.delta;
+            tokenCounter += 1;
+            // Cancel check every 16 tokens — one DB round-trip per ~16 tokens
+            // is cheap enough but still responsive for a user pressing pause.
+            if (tokenCounter % 16 === 0 && (await isCancelRequested(activeStreamingMessage.id))) {
+              cancelled = true;
+              break;
+            }
             publishConversationEvent(params.id, "message.delta", {
-              id: streamingAssistantMessage.id,
+              id: activeStreamingMessage.id,
               conversation: params.id,
               conversationId: params.id,
               role: MessageRole.assistant,
               messageType: MessageType.ai,
               content: assembled,
-              metadata: streamingAssistantMessage.metadata,
+              metadata: activeStreamingMessage.metadata,
               designTaskId: task?.id ?? null,
-              createdAt: streamingAssistantMessage.created_at,
+              createdAt: activeStreamingMessage.created_at,
             });
           } else if (evt.type === "done") {
             usage = evt.usage;
@@ -1192,24 +2111,54 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
       } catch (error) {
         console.warn("[conversations/:id/messages] streaming failed, falling back:", error);
-        const completion = await flexionComplete({ model, messages, temperature: 0.35, providerConfig: resolvedModel.providerConfig });
+        const completion = await flexionComplete({
+          model,
+          messages,
+          max_tokens: 2200,
+          temperature: 0.35,
+          providerConfig: resolvedModel.providerConfig,
+        });
         assembled = completion.text;
         usage = completion.usage;
         completionModel = completion.model;
       }
       assistantText = assembled;
+      if (cancelled) {
+        // Settle the placeholder as cancelled and skip the rest of the
+        // finalize pipeline (no credit consumption, no generation dispatch).
+        const cancelledMessage = await prisma.message.update({
+          where: { id: activeStreamingMessage.id },
+          data: {
+            content: { type: "text", text: assembled },
+            metadata: {
+              ...((activeStreamingMessage.metadata as Record<string, unknown>) ?? {}),
+              status: "cancelled",
+              phase: "cancelled",
+              cancelledAt: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+        assistantFinalized = true;
+        publishConversationEvent(params.id, "message.completed", shapeMessage(cancelledMessage));
+        return NextResponse.json({
+          userMessage: shapeMessage(userMessage),
+          assistantMessage: shapeMessage(cancelledMessage),
+          task: task ? shapeDesignTask(task) : undefined,
+          streaming: false,
+          cancelled: true,
+        });
+      }
     }
 
     const credits = openingReply ? BigInt(0) : rawToCredits(model, usage, resolvedModel.creditMultiplier);
     const recommendedActions = detectRecommendedActions(assistantText);
     const suggestedItems = extractSuggestedItems(assistantText);
-    const generationHints = ["產生", "生成", "第一版", "brief", "草稿"];
     const canGenerate =
-      forceGenerate ||
-      forceRecommendation ||
-      (!openingReply &&
-        Boolean(task) &&
-        generationHints.some((hint) => assistantText.includes(hint)));
+      !switchedTaskThisTurn &&
+      (directionChosen ||
+      (forceGenerate ||
+        forceRecommendation ||
+        (!openingReply && Boolean(task) && intent?.wantsGeneration === true)));
     const openingQuickActions = openingReply
       ? buildOpeningQuickActions(task?.task_type, task?.id)
       : [];
@@ -1222,7 +2171,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       : [];
     const choiceQuickActions = openingQuickActions.length > 0
       ? []
-      : buildChoiceQuickActions(assistantText, task?.id);
+      : buildChoiceQuickActions({
+          text: assistantText,
+          taskId: task?.id,
+          canGenerate,
+        });
     const stepDecision = buildStepDecision({
       taskType: task?.task_type,
       taskId: task?.id,
@@ -1291,18 +2244,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         suggestedItems,
         quickActions,
         stepDecision,
-        marketingIntelligence: intelligence
-          ? {
-              query: intelligence.query,
-              summary: intelligence.summary,
-              searchModel: intelligence.searchModel,
-              sources: intelligence.sources,
-              visualReferences: intelligence.visualReferences,
-              referenceCards: intelligence.visualReferences,
-              groundedMode: intelligence.groundedMode,
-              createdAt: intelligence.createdAt,
-            }
-          : null,
+        // marketingIntelligence is grafted on by the background settle block
+        // below (and via the `marketing.intelligence.ready` SSE event), so we
+        // don't include it in the initial payload anymore.
+        marketingIntelligence: null,
       } as Prisma.InputJsonValue,
       design_task_id: task?.id,
       tokens_input: usage.input_tokens,
@@ -1310,9 +2255,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       credits_used: credits,
       model: completionModel,
     };
-    const assistantMessage = streamingAssistantMessage
+    const activeStreamingAssistant = streamingAssistantMessage as Message | null;
+    const assistantMessage = activeStreamingAssistant
       ? await prisma.message.update({
-          where: { id: streamingAssistantMessage.id },
+          where: { id: activeStreamingAssistant.id },
           data: assistantPayload,
         })
       : await prisma.message.create({
@@ -1321,6 +2267,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             role: MessageRole.assistant,
             message_type: MessageType.ai,
             ...assistantPayload,
+            parent_message_id: userMessage.id,
           },
         });
     assistantFinalized = true;
@@ -1329,6 +2276,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       where: { id: params.id },
       data: {
         last_message_at: new Date(),
+        active_leaf_message_id: assistantMessage.id,
         ...(task ? { active_design_task_id: task.id } : {}),
         ...(conversation.title === "新對話" || conversation.title === "New Conversation"
           ? { title: text.slice(0, 32) }
@@ -1351,25 +2299,85 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await consumeCredits(user.id, credits);
     publishConversationEvent(params.id, "message.completed", shapeMessage(assistantMessage));
 
+    // Background settle for fire-and-forget marketing intelligence. The main
+    // reply has already finished; here we graft the citations/visual refs
+    // onto the same message once the search returns, and let the client
+    // re-render the references section via SSE. Do not await this promise:
+    // awaiting it makes the HTTP request look frozen until search finishes.
+    if (intelligencePromise) {
+      void intelligencePromise.then(async (settled) => {
+        if (settled) {
+          const refreshed = await prisma.message.findUnique({ where: { id: assistantMessage.id } });
+          const existingMetadata =
+            refreshed?.metadata && typeof refreshed.metadata === "object" && !Array.isArray(refreshed.metadata)
+              ? (refreshed.metadata as Record<string, unknown>)
+              : {};
+          const updated = await prisma.message.update({
+            where: { id: assistantMessage.id },
+            data: {
+              metadata: {
+                ...existingMetadata,
+                marketingIntelligence: {
+                  query: settled.query,
+                  summary: settled.summary,
+                  searchModel: settled.searchModel,
+                  sources: settled.sources,
+                  visualReferences: settled.visualReferences,
+                  referenceCards: settled.visualReferences,
+                  groundedMode: settled.groundedMode,
+                  createdAt: settled.createdAt,
+                },
+              } as Prisma.InputJsonValue,
+            },
+          });
+          publishConversationEvent(params.id, "message.updated", shapeMessage(updated));
+          publishConversationEvent(params.id, "marketing.intelligence.ready", {
+            messageId: assistantMessage.id,
+            conversationId: params.id,
+            marketingIntelligence: {
+              query: settled.query,
+              summary: settled.summary,
+              sources: settled.sources,
+              visualReferences: settled.visualReferences,
+              groundedMode: settled.groundedMode,
+              createdAt: settled.createdAt,
+            },
+          });
+        }
+      }).catch((error) => {
+        console.warn("[conversations/:id/messages] marketing intelligence settle failed:", error);
+      });
+    }
+
+    // Text + image generation now early-return through the dispatcher block
+    // above, so by the time we reach this point we're in a plain consultative
+    // reply path — no follow-up generation_result message to emit.
     return NextResponse.json({
       userMessage: shapeMessage(userMessage),
       assistantMessage: shapeMessage(assistantMessage),
+      task: task ? shapeDesignTask(task) : undefined,
       streaming: false,
     });
   } catch (err) {
-    if (streamingAssistantMessage && !assistantFinalized) {
+    const activeStreamingAssistant = streamingAssistantMessage as Message | null;
+    if (activeStreamingAssistant && !assistantFinalized) {
       // Never leave the placeholder stuck in `streaming` status: mark it
       // failed so clients render a settled (failed) message instead of an
       // eternally-typing one.
       try {
+        const errorMessage = err instanceof Error ? err.message : "completion failed";
+        const publicErrorMessage = errorMessage.includes("requires more credits") || errorMessage.includes("402")
+          ? "這次回覆沒有產生完成：模型額度不足或 token 上限過高。請稍後重試，或到後台調整模型設定。"
+          : "這次回覆沒有產生完成，請再試一次。";
         const failedMessage = await prisma.message.update({
-          where: { id: streamingAssistantMessage.id },
+          where: { id: activeStreamingAssistant.id },
           data: {
+            content: { type: "text", text: publicErrorMessage },
             metadata: {
-              ...((streamingAssistantMessage.metadata as Record<string, unknown>) ?? {}),
+              ...((activeStreamingAssistant.metadata as Record<string, unknown>) ?? {}),
               status: "failed",
               phase: "failed",
-              errorMessage: err instanceof Error ? err.message : "completion failed",
+              errorMessage,
             } as Prisma.InputJsonValue,
           },
         });

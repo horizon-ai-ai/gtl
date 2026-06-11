@@ -247,6 +247,7 @@ export async function updateAiModelSetting(input: {
 }
 
 export async function pickConversationModels(_plan = "free") {
+  void _plan;
   const settings = await listActiveAiModelSettings("conversation");
   return settings.map(publicModelOption);
 }
@@ -254,6 +255,7 @@ export async function pickConversationModels(_plan = "free") {
 export function pickConversationModelsFromEnv(
   _plan = "free",
 ): Array<{ id: string; value: string; label: string; provider?: string }> {
+  void _plan;
   return [];
 }
 

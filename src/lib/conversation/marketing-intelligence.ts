@@ -66,7 +66,6 @@ type ResponseImageCandidate = {
 
 const SEARCH_REQUIRED = new Set(["strategy", "trend", "competitive", "factual"]);
 const VISUAL_REFERENCE_LIMIT = 6;
-const mainImageCache = new Map<string, string | null>();
 
 function taipeiDate() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -210,15 +209,6 @@ function getNumber(record: Record<string, unknown>, keys: string[]) {
   return 0;
 }
 
-function absoluteUrl(value: string, baseUrl: string) {
-  if (!value.trim()) return null;
-  try {
-    return new URL(value.trim(), baseUrl).toString();
-  } catch {
-    return null;
-  }
-}
-
 function hostMatches(sourceUrl: string, candidateOriginUrl: string) {
   const sourceHost = hostname(sourceUrl);
   const candidateHost = hostname(candidateOriginUrl);
@@ -251,141 +241,95 @@ function responseImageCandidates(response: ChatCompletionResponse): ResponseImag
   return output;
 }
 
-function extractAttribute(tag: string, name: string) {
-  const lowerTag = tag.toLowerCase();
-  const lowerName = name.toLowerCase();
-  let cursor = 0;
-
-  while (cursor < lowerTag.length) {
-    const index = lowerTag.indexOf(lowerName, cursor);
-    if (index < 0) return "";
-    const before = index === 0 ? " " : lowerTag[index - 1];
-    const after = lowerTag[index + lowerName.length];
-    const beforeOk = before === " " || before === "\n" || before === "\t" || before === "<";
-    if (beforeOk && after === "=") {
-      const valueStart = index + lowerName.length + 1;
-      const quote = tag[valueStart];
-      if (quote === '"' || quote === "'") {
-        const valueEnd = tag.indexOf(quote, valueStart + 1);
-        return valueEnd > valueStart ? tag.slice(valueStart + 1, valueEnd).trim() : "";
-      }
-      const nextSpace = tag.indexOf(" ", valueStart);
-      const nextEnd = tag.indexOf(">", valueStart);
-      const valueEnd = nextSpace >= 0 ? nextSpace : nextEnd >= 0 ? nextEnd : tag.length;
-      return tag.slice(valueStart, valueEnd).trim();
-    }
-    cursor = index + lowerName.length;
+// Pure in-memory enrichment. The previous version fetched each source URL,
+// parsed HTML for og:image, then did HEAD/GET to verify each thumbnail —
+// 10-30s of latency that blocked the main reply. We now trust whatever the
+// search model returns plus the image candidates it emits inline, dedupe,
+// and ship. Visual reference cards that lack a thumbnail just render
+// text-only — better than waiting 20s for an og:image.
+function absolutizeUrl(baseUrl: string, candidate: string) {
+  try {
+    return new URL(candidate, baseUrl).toString();
+  } catch {
+    return "";
   }
-  return "";
 }
 
-function findMetaContent(html: string, names: string[]) {
-  const lowerHtml = html.toLowerCase();
-  let cursor = 0;
+function readHtmlAttr(tag: string, attrName: string) {
+  const lower = tag.toLowerCase();
+  const needle = attrName.toLowerCase();
+  const start = lower.indexOf(needle);
+  if (start < 0) return "";
+  const eq = lower.indexOf("=", start + needle.length);
+  if (eq < 0) return "";
+  let cursor = eq + 1;
+  while (cursor < tag.length && tag[cursor] === " ") cursor += 1;
+  const quote = tag[cursor];
+  if (quote !== '"' && quote !== "'") return "";
+  const end = tag.indexOf(quote, cursor + 1);
+  return end > cursor ? tag.slice(cursor + 1, end).trim() : "";
+}
 
-  while (cursor < lowerHtml.length) {
-    const start = lowerHtml.indexOf("<meta", cursor);
-    if (start < 0) return "";
-    const end = lowerHtml.indexOf(">", start);
-    if (end < 0) return "";
+function metaImageFromHtml(html: string, sourceUrl: string) {
+  const candidates = ["og:image", "twitter:image", "twitter:image:src"];
+  let cursor = 0;
+  while (cursor < html.length) {
+    const start = html.toLowerCase().indexOf("<meta", cursor);
+    if (start < 0) break;
+    const end = html.indexOf(">", start);
+    if (end < 0) break;
     const tag = html.slice(start, end + 1);
-    const property = extractAttribute(tag, "property").toLowerCase();
-    const name = extractAttribute(tag, "name").toLowerCase();
-    if (names.includes(property) || names.includes(name)) {
-      const content = extractAttribute(tag, "content");
-      if (content) return content;
+    const property = readHtmlAttr(tag, "property") || readHtmlAttr(tag, "name");
+    const content = readHtmlAttr(tag, "content");
+    if (content && candidates.includes(property.toLowerCase())) {
+      const absolute = absolutizeUrl(sourceUrl, content);
+      if (isHttpUrl(absolute)) return absolute;
     }
     cursor = end + 1;
   }
   return "";
 }
 
-function findFirstLargeImage(html: string, sourceUrl: string) {
-  const lowerHtml = html.toLowerCase();
-  let cursor = 0;
-
-  while (cursor < lowerHtml.length) {
-    const start = lowerHtml.indexOf("<img", cursor);
-    if (start < 0) return null;
-    const end = lowerHtml.indexOf(">", start);
-    if (end < 0) return null;
-    const tag = html.slice(start, end + 1);
-    const src = extractAttribute(tag, "src") || extractAttribute(tag, "data-src");
-    const width = Number(extractAttribute(tag, "width") || 0);
-    const height = Number(extractAttribute(tag, "height") || 0);
-    if (src && (width === 0 || width >= 300) && (height === 0 || height >= 180)) {
-      const resolved = absoluteUrl(src, sourceUrl);
-      if (resolved && isHttpUrl(resolved)) return resolved;
-    }
-    cursor = end + 1;
-  }
-  return null;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 6000) {
+async function fetchPagePreviewImage(sourceUrl: string) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), 1200);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(sourceUrl, {
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 GTLBot/1.0" },
+    });
+    const contentType = response.headers.get("content-type") || "";
+    if (!response.ok || !contentType.includes("text/html")) return "";
+    const html = (await response.text()).slice(0, 90000);
+    return metaImageFromHtml(html, sourceUrl);
+  } catch {
+    return "";
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timeout);
   }
 }
 
-async function verifyImageUrl(url: string) {
-  try {
-    const head = await fetchWithTimeout(url, {
-      method: "HEAD",
-      headers: { "User-Agent": "Mozilla/5.0" },
-    }, 3500);
-    const contentType = head.headers.get("content-type") || "";
-    if (head.ok && contentType.toLowerCase().startsWith("image/")) return true;
-  } catch {
-    // Some publishers block HEAD; try a tiny GET below.
-  }
-
-  try {
-    const get = await fetchWithTimeout(url, {
-      method: "GET",
-      headers: { "User-Agent": "Mozilla/5.0", Range: "bytes=0-0" },
-    }, 3500);
-    const contentType = get.headers.get("content-type") || "";
-    return get.ok && contentType.toLowerCase().startsWith("image/");
-  } catch {
-    return false;
-  }
-}
-
-async function sourceMainImage(sourceUrl: string) {
-  if (mainImageCache.has(sourceUrl)) return mainImageCache.get(sourceUrl) ?? null;
-  try {
-    const res = await fetchWithTimeout(sourceUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-    }, 6500);
-    if (!res.ok) {
-      mainImageCache.set(sourceUrl, null);
-      return null;
-    }
-    const html = await res.text();
-    const metaImage =
-      findMetaContent(html, ["og:image", "twitter:image", "twitter:image:src"]) ||
-      findFirstLargeImage(html, sourceUrl) ||
-      "";
-    const resolved = metaImage ? absoluteUrl(metaImage, sourceUrl) : null;
-    const usable = resolved && (await verifyImageUrl(resolved)) ? resolved : null;
-    mainImageCache.set(sourceUrl, usable);
-    return usable;
-  } catch {
-    mainImageCache.set(sourceUrl, null);
-    return null;
-  }
+async function fillMissingPreviewImages(references: MarketingVisualReference[]) {
+  const targets = references
+    .map((reference, index) => ({ reference, index }))
+    .filter(({ reference }) => !reference.thumbnailUrl)
+    .slice(0, 4);
+  if (targets.length === 0) return references;
+  const images = await Promise.all(targets.map(({ reference }) => fetchPagePreviewImage(reference.url)));
+  const next = references.slice();
+  targets.forEach(({ index }, targetIndex) => {
+    const thumbnailUrl = images[targetIndex];
+    if (!thumbnailUrl) return;
+    next[index] = { ...next[index], thumbnailUrl };
+  });
+  return next;
 }
 
 async function enrichVisualReferences(params: {
   sources: MarketingIntelligenceSource[];
   visualReferences: MarketingVisualReference[];
   imageCandidates: ResponseImageCandidate[];
-}) {
+}): Promise<MarketingVisualReference[]> {
   const output: MarketingVisualReference[] = [];
   const seenUrls = new Set<string>();
   const seenImages = new Set<string>();
@@ -398,38 +342,31 @@ async function enrichVisualReferences(params: {
     output.push(reference);
   };
 
-  const sourceReferences = await Promise.all(params.sources.slice(0, VISUAL_REFERENCE_LIMIT).map(async (source) => {
+  // First: pair each source with the best matching inline image candidate.
+  for (const source of params.sources.slice(0, VISUAL_REFERENCE_LIMIT)) {
     const candidate = params.imageCandidates
       .filter((image) => hostMatches(source.url, image.originUrl))
       .filter((image) => image.width === 0 || image.width >= 600)
       .sort((a, b) => b.width - a.width)[0];
-    const thumbnailUrl = candidate?.imageUrl || (await sourceMainImage(source.url));
-    if (!thumbnailUrl) return null;
-    return {
+    if (!candidate) continue;
+    addReference({
       title: source.title || source.url,
       url: source.url,
       source: source.publisher || hostname(source.url),
-      thumbnailUrl,
+      thumbnailUrl: candidate.imageUrl,
       reason: source.snippet || null,
       styleTags: [],
       usage: "inspiration_only",
-    } satisfies MarketingVisualReference;
-  }));
-
-  for (const reference of sourceReferences) {
-    if (reference) addReference(reference);
+    });
   }
 
+  // Next: LLM-returned visual references (we trust their thumbnailUrl as-is).
   for (const reference of params.visualReferences) {
-    if (reference.thumbnailUrl) {
-      addReference(reference);
-    } else {
-      const thumbnailUrl = await sourceMainImage(reference.url);
-      if (thumbnailUrl) addReference({ ...reference, thumbnailUrl });
-    }
+    addReference(reference);
     if (output.length >= VISUAL_REFERENCE_LIMIT) break;
   }
 
+  // Finally: any leftover image candidates as standalone references.
   for (const candidate of params.imageCandidates) {
     addReference({
       title: candidate.originUrl,
@@ -443,7 +380,7 @@ async function enrichVisualReferences(params: {
     if (output.length >= VISUAL_REFERENCE_LIMIT) break;
   }
 
-  return output.slice(0, VISUAL_REFERENCE_LIMIT);
+  return fillMissingPreviewImages(output.slice(0, VISUAL_REFERENCE_LIMIT));
 }
 
 async function openRouterChat(params: {
@@ -549,14 +486,19 @@ export class MarketingIntelligenceService {
     recentTurns: Array<{ role: "user" | "assistant"; content: string }>;
     forceSearch?: boolean;
     forceVisualReferences?: boolean;
+    onProgress?: (step: { label: string; detail?: string }) => void | Promise<void>;
   }): Promise<MarketingIntelligencePack | null> {
     if (!this.isAvailable()) return null;
 
+    await params.onProgress?.({ label: "判斷是否需要搜尋", detail: "正在判斷這輪是否需要外部資料補強" });
     const routerModel = await resolvePurposeModelConfig("marketing_router");
     const searchModel = await resolvePurposeModelConfig("marketing_search");
     const deepSearchModel = await resolvePurposeModelConfig("marketing_deep");
     if (!params.forceSearch && !routerModel) return null;
 
+    if (!params.forceSearch) {
+      await params.onProgress?.({ label: "分析問題類型", detail: "正在判斷是一般對話、建議，還是需要查案例與來源" });
+    }
     const classification = params.forceSearch
       ? this.forcedRecommendationClassification(params)
       : routerModel
@@ -571,12 +513,17 @@ export class MarketingIntelligenceService {
 
     const selectedSearchModel = classification.searchDepth === "deep" ? (deepSearchModel ?? searchModel) : searchModel;
     if (!selectedSearchModel) return null;
+    await params.onProgress?.({
+      label: "查找市場資料",
+      detail: `正在查找 ${queries.length} 組參考資料，優先整理可引用來源`,
+    });
     const research = await this.research({
       classification,
       model: selectedSearchModel,
       query: queries.join("\n"),
       task: params.task,
     });
+    await params.onProgress?.({ label: "整理搜尋結果", detail: "正在把來源、洞察與參考卡片整理進回覆上下文" });
 
     return {
       provider: "openrouter",

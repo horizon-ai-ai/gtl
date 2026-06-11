@@ -190,11 +190,25 @@ export function shapeMessage(message: Message) {
         ? metadata.stepDecision
         : null,
     designTaskId: message.design_task_id,
+    parentMessageId: message.parent_message_id,
     tokensInput: message.tokens_input,
     tokensOutput: message.tokens_output,
     creditsUsed: Number(message.credits_used),
     model: message.model,
     createdAt: message.created_at,
+  };
+}
+
+export function shapeMessageWithSiblings(
+  message: Message,
+  siblings: { count: number; index: number; ids: string[] },
+) {
+  const base = shapeMessage(message);
+  return {
+    ...base,
+    siblingCount: siblings.count,
+    siblingIndex: siblings.index,
+    siblingIds: siblings.ids,
   };
 }
 
