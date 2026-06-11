@@ -1666,19 +1666,42 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       take: 50,
     });
 
-    const sub = await prisma.subscription.findUnique({
-      where: { user_id: user.id },
-      include: { plan: true },
-    });
-    const planCode = sub?.plan.code ?? "free";
-    const requestedModel =
+    let planCodePromise: Promise<string> | null = null;
+    const getPlanCode = () => {
+      if (!planCodePromise) {
+        planCodePromise = prisma.subscription
+          .findUnique({ where: { user_id: user.id }, include: { plan: true } })
+          .then((sub) => sub?.plan.code ?? "free");
+      }
+      return planCodePromise;
+    };
+    const modelResolutions = new Map<
+      string,
+      Promise<Awaited<ReturnType<typeof resolveRequestedModelForProvider>>>
+    >();
+    const resolveConversationModel = (requested: string) => {
+      let pending = modelResolutions.get(requested);
+      if (!pending) {
+        pending = getPlanCode().then((plan) => resolveRequestedModelForProvider(plan, requested));
+        modelResolutions.set(requested, pending);
+      }
+      return pending;
+    };
+    const baseRequestedModel =
       typeof body.selectedModel === "string" && body.selectedModel.trim()
         ? body.selectedModel.trim()
         : typeof body.model === "string" && body.model.trim()
           ? body.model.trim()
-          : conversation.ai_model || activeTask?.preferred_model || "";
-    const resolvedModel = await resolveRequestedModelForProvider(planCode, requestedModel);
-    const model = resolvedModel.model;
+          : conversation.ai_model || "";
+    const earlyResolvedModel = await resolveConversationModel(baseRequestedModel);
+    const earlyIntent = await inferConversationIntent({
+      userMessage: text,
+      recentTurns: buildRecentTurns(preTaskHistory),
+      activeTaskType: activeTask?.task_type ?? null,
+      quickReplyAction: preQuickReplyAction || null,
+      model: earlyResolvedModel.model,
+      providerConfig: earlyResolvedModel.providerConfig,
+    });
 
     const appendParentMessageId = editedUserMessage
       ? null
@@ -1706,15 +1729,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       });
       publishConversationEvent(params.id, "message.created", shapeMessage(userMessage));
     }
-
-    const earlyIntent = await inferConversationIntent({
-      userMessage: text,
-      recentTurns: buildRecentTurns(preTaskHistory),
-      activeTaskType: activeTask?.task_type ?? null,
-      quickReplyAction: preQuickReplyAction || null,
-      model,
-      providerConfig: resolvedModel.providerConfig,
-    });
     const inferredTaskTypeForRouting = parseDesignTaskType(earlyIntent?.taskType);
     const shouldHandleWebsiteBuilder =
       websiteBuilderCandidate &&
@@ -1853,6 +1867,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       orderBy: { created_at: "asc" },
       take: 50,
     });
+    const requestedModel =
+      typeof body.selectedModel === "string" && body.selectedModel.trim()
+        ? body.selectedModel.trim()
+        : typeof body.model === "string" && body.model.trim()
+          ? body.model.trim()
+          : conversation.ai_model || task?.preferred_model || "";
+    // Never forward the raw client value: validate against the plan allowlist
+    // and clamp to the plan default on a miss. Memoized: reuses the pre-intent
+    // resolution when the requested model id is unchanged.
+    const resolvedModel = await resolveConversationModel(requestedModel);
+    const model = resolvedModel.model;
     const quickReply = bodyQuickReply(body);
     const intent = earlyIntent || await inferConversationIntent({
       userMessage: text,

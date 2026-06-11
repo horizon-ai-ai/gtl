@@ -1138,7 +1138,6 @@ export default function GeneratePage() {
   const activeConversationId = searchParams.get("conversationId");
   const historyRequested = searchParams.get("history") === "1";
   const [input, setInput] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickAction | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [usage, setUsage] = useState<UsagePayload | null>(null);
@@ -1163,7 +1162,6 @@ export default function GeneratePage() {
     activeConversation,
     activeDesignTask,
     designTaskStarters,
-    models,
     isSending,
     isLoadingMessages,
     error,
@@ -1176,7 +1174,6 @@ export default function GeneratePage() {
     stopActiveMessage,
   } = useConversations(activeConversationId);
 
-  const modelValue = selectedModel || activeConversation?.aiModel || models[0]?.value || "";
   const visiblePromptChips = useMemo(() => {
     const pinnedIds = new Set(["logo", "landing", "brand-site", "social-copy", "seo", "trade-strategy"]);
     return DEFAULT_PROMPT_CHIPS.filter((chip) => pinnedIds.has(chip.id));
@@ -1666,7 +1663,7 @@ export default function GeneratePage() {
 
   async function ensureConversation(autoTitle?: string) {
     if (activeConversationId) return activeConversationId;
-    const conversation = await createConversation(autoTitle || "New Conversation", modelValue || undefined);
+    const conversation = await createConversation(autoTitle || "New Conversation");
     router.push(`/generate?conversationId=${conversation.id}`);
     return conversation.id;
   }
@@ -1700,7 +1697,6 @@ export default function GeneratePage() {
       const conversationId = await ensureConversation(content.slice(0, 32));
       await sendMessage(conversationId, {
         content,
-        selectedModel: modelValue,
         designTaskIds: activeDesignTask ? [activeDesignTask.id] : [],
         files,
         metadata: {
@@ -1723,7 +1719,6 @@ export default function GeneratePage() {
       });
       await sendMessage(conversationId, {
         content: starter.label,
-        selectedModel: modelValue,
         designTaskIds: [task.id],
         metadata: {
           source: "web",
@@ -1786,7 +1781,6 @@ export default function GeneratePage() {
       const conversationId = await ensureConversation();
       await sendMessage(conversationId, {
         content: value,
-        selectedModel: modelValue,
         designTaskIds: action.taskId ? [action.taskId] : activeDesignTask ? [activeDesignTask.id] : [],
         metadata: {
           source: "web",
@@ -1853,7 +1847,6 @@ export default function GeneratePage() {
 
       const result = await sendMessage(conversationId, {
         content,
-        selectedModel: modelValue,
         designTaskIds: targetTaskId ? [targetTaskId] : activeDesignTask ? [activeDesignTask.id] : [],
         metadata: {
           source: "web",
@@ -1959,7 +1952,6 @@ export default function GeneratePage() {
                       const conversationId = await ensureConversation(value.slice(0, 32));
                       await sendMessage(conversationId, {
                         content: value,
-                        selectedModel: modelValue,
                         designTaskIds: activeDesignTask ? [activeDesignTask.id] : [],
                         files,
                         metadata: {
@@ -1981,15 +1973,11 @@ export default function GeneratePage() {
                   <div className="mx-auto w-full max-w-3xl">
                     <AIChatInput
                       ref={inputRef}
-	                      value={input}
-	                      onChange={handleInputChange}
-	                      onSend={(value, files) => void handleSend(value, files)}
-	                      onStop={handleStopActiveMessage}
-	                      loading={busy}
-                      modelOptions={models}
-                      selectedModel={modelValue}
-                      onModelChange={setSelectedModel}
-                      requireModel
+                      value={input}
+                      onChange={handleInputChange}
+                      onSend={(value, files) => void handleSend(value, files)}
+                      onStop={handleStopActiveMessage}
+                      loading={busy}
                     />
                     <CreditFooter usage={usage} error={error} />
                   </div>
@@ -2065,10 +2053,6 @@ export default function GeneratePage() {
                 onSend={(value, files) => void handleSend(value, files)}
                 onStop={handleStopActiveMessage}
                 loading={busy}
-                modelOptions={models}
-                selectedModel={modelValue}
-                onModelChange={setSelectedModel}
-                requireModel
                 placeholder="描述你想做的圖、文案或網頁..."
               />
               <PromptChips

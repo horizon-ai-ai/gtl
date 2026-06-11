@@ -72,12 +72,6 @@ export interface ConversationStepDecision {
   [key: string]: unknown;
 }
 
-export interface ModelOption {
-  value: string;
-  label: string;
-  provider?: string;
-  isDefault?: boolean;
-}
 
 export interface DesignTaskStarter {
   taskType: string;
