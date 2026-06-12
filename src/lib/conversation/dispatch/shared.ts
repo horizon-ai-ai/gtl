@@ -229,9 +229,28 @@ export async function updateGenerationMessage(
   options?: { publish?: boolean; eventType?: "message.updated" | "message.completed" },
 ) {
   const existingMetadata = objectRecord(message.metadata);
-  const nextMetadata = data.metadataMerge
-    ? { ...existingMetadata, ...data.metadataMerge }
-    : existingMetadata;
+  // Merge-safe against a concurrent cancel: the in-memory snapshot may predate
+  // the cancel route's metadata write, and writing the snapshot back would
+  // silently erase the cancelRequested flag mid-stream. Re-read the current
+  // row and preserve the cancellation fields over both the snapshot and the
+  // caller's merge.
+  const currentRow = await prisma.message.findUnique({
+    where: { id: message.id },
+    select: { metadata: true },
+  });
+  const currentMetadata = objectRecord(currentRow?.metadata);
+  const cancellationFields: Record<string, unknown> = {};
+  if (currentMetadata.cancelRequested === true) {
+    cancellationFields.cancelRequested = true;
+    if (currentMetadata.cancelRequestedAt !== undefined) {
+      cancellationFields.cancelRequestedAt = currentMetadata.cancelRequestedAt;
+    }
+  }
+  const nextMetadata = {
+    ...existingMetadata,
+    ...(data.metadataMerge ?? {}),
+    ...cancellationFields,
+  };
   const updated = await prisma.message.update({
     where: { id: message.id },
     data: {

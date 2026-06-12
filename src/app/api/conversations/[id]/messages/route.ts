@@ -34,7 +34,7 @@ import {
 import { inferConversationIntent, type UserIntentResult } from "@/lib/conversation/intent-resolver";
 import { dispatchImageGeneration } from "@/lib/conversation/generation-dispatcher";
 import { dispatchTextGeneration } from "@/lib/conversation/dispatch/text-generation";
-import { isCancelRequested } from "@/lib/conversation/dispatch/shared";
+import { isCancelRequested, updateGenerationMessage } from "@/lib/conversation/dispatch/shared";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
 import { flexionComplete, flexionStream, rawToCredits, type FlexionRequest } from "@/lib/flexion";
@@ -1151,20 +1151,19 @@ async function legacyCreateGenerationResult(params: {
     const now = Date.now();
     if (!force && now - lastPublishedAt < 320) return;
     lastPublishedAt = now;
-    message = await prisma.message.update({
-      where: { id: message.id },
-      data: {
-        content: {
-          ...baseContent,
-          text: assembled,
-        },
-        metadata: {
-          ...baseMetadata,
-          outputGroups: [...existingGroups, buildOutputGroup(assembled)],
-        } as Prisma.InputJsonValue,
+    // updateGenerationMessage is merge-safe: it preserves a concurrently
+    // written cancelRequested flag instead of overwriting it with the
+    // in-memory snapshot.
+    message = await updateGenerationMessage(params.conversationId, message, {
+      content: {
+        ...baseContent,
+        text: assembled,
+      } as Prisma.InputJsonValue,
+      metadataMerge: {
+        ...baseMetadata,
+        outputGroups: [...existingGroups, buildOutputGroup(assembled)],
       },
     });
-    publishConversationEvent(params.conversationId, "message.updated", shapeMessage(message));
     publishConversationEvent(params.conversationId, "generation.result.updated", {
       messageId: message.id,
       taskId: params.task.id,
@@ -1172,6 +1171,8 @@ async function legacyCreateGenerationResult(params: {
     });
   };
 
+  let tokenCounter = 0;
+  let generationCancelled = false;
   for await (const evt of flexionStream({
     model: params.model,
     messages: [
@@ -1187,12 +1188,46 @@ async function legacyCreateGenerationResult(params: {
   })) {
     if (evt.type === "token") {
       assembled += evt.delta;
+      tokenCounter += 1;
+      if (tokenCounter % 16 === 0 && (await isCancelRequested(message.id))) {
+        generationCancelled = true;
+        break;
+      }
       await publishStreamingResult(false);
     } else if (evt.type === "done") {
       usage = evt.usage;
       completionModel = evt.model;
     }
   }
+
+  if (generationCancelled) {
+    const cancelledMessage = await updateGenerationMessage(params.conversationId, message, {
+      content: {
+        ...baseContent,
+        status: "cancelled",
+        text: assembled,
+      } as Prisma.InputJsonValue,
+      metadataMerge: {
+        status: "cancelled",
+        lastStatusAt: new Date().toISOString(),
+        outputGroups: assembled ? [...existingGroups, buildOutputGroup(assembled)] : existingGroups,
+        receivedOutputCount: assembled ? 1 : 0,
+        pendingOutputs: 0,
+      },
+    });
+    publishConversationEvent(params.conversationId, "generation.result.failed", {
+      messageId: cancelledMessage.id,
+      taskId: params.task.id,
+      status: "cancelled",
+    });
+    return {
+      updatedTask: params.task,
+      message: cancelledMessage,
+      usage,
+      credits: BigInt(0),
+    };
+  }
+
   await publishStreamingResult(true);
   const credits = rawToCredits(completionModel, usage, params.creditMultiplier);
   const outputGroup = buildOutputGroup(assembled);

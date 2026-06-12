@@ -374,6 +374,37 @@ function upsertIncomingMessage(current: ChatMessage[], incoming: ChatMessage) {
   return sortMessages(current.map((message) => (message.id === incoming.id ? nextMessage : message)));
 }
 
+/**
+ * Pending-cancel handshake for early stops. When the user stops a send while
+ * the assistant message is still a `local-` placeholder, the server cancel
+ * cannot be issued yet — the server message id is unknown. The tracker
+ * records the intent per conversation; `claim` returns true exactly once
+ * when the server-assigned assistant id arrives (send response or SSE
+ * `message.created`), and `clear` discards the intent when a send fails
+ * without ever producing a server id.
+ */
+export function createPendingCancelTracker() {
+  const pending = new Set<string>();
+  return {
+    recordEarlyStop(conversationId: string) {
+      pending.add(conversationId);
+    },
+    clear(conversationId: string) {
+      pending.delete(conversationId);
+    },
+    claim(
+      conversationId: string | null | undefined,
+      message: { id: string; role?: string | null },
+    ) {
+      if (!conversationId || !pending.has(conversationId)) return false;
+      if (message.role !== "assistant") return false;
+      if (!message.id || message.id.startsWith("local-")) return false;
+      pending.delete(conversationId);
+      return true;
+    },
+  };
+}
+
 export function streamMessageFromEvent(event: MessageEvent, eventName: string) {
   try {
     const envelope = JSON.parse(event.data) as { data?: unknown };
@@ -502,6 +533,7 @@ export function useConversations(activeConversationId?: string | null) {
   const sendingConversationIdRef = useRef<string | null>(null);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const activeLocalMessageIdsRef = useRef<string[]>([]);
+  const pendingCancelRef = useRef(createPendingCancelTracker());
 
   const listConversations = useCallback(async () => {
     const data = await apiJson<Conversation[]>("/api/conversations");
@@ -603,8 +635,16 @@ export function useConversations(activeConversationId?: string | null) {
     }
     setIsSending(false);
 
-    if (conversationId && messageId && !messageId.startsWith("local-")) {
-      await cancelMessage(conversationId, messageId);
+    if (conversationId && messageId) {
+      if (messageId.startsWith("local-")) {
+        // Early stop: the server message id is not known yet. Record a
+        // pending cancel; it fires as soon as the id arrives (send response
+        // or SSE message.created), so the generation ends as cancelled
+        // instead of completing and billing.
+        pendingCancelRef.current.recordEarlyStop(conversationId);
+      } else {
+        await cancelMessage(conversationId, messageId);
+      }
     }
   }, [cancelMessage]);
 
@@ -820,14 +860,26 @@ export function useConversations(activeConversationId?: string | null) {
           ...(assistantMessage ? [assistantMessage] : []),
         ]);
       });
+      const settledAssistant = result.assistantMessage ? normalizeMessage(result.assistantMessage) : null;
+      if (settledAssistant && pendingCancelRef.current.claim(conversationId, settledAssistant)) {
+        await cancelMessage(conversationId, settledAssistant.id);
+      }
       await loadConversation(conversationId);
       await listConversations();
       return result;
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
+        // Stop was pressed: the fetch is gone but the server keeps processing
+        // the request, so a pending cancel recorded by stopActiveMessage must
+        // survive — the SSE message.created event will claim it and issue the
+        // server-side cancel as soon as the assistant message id is known.
         setMessages((current) => sortMessages(current.filter((item) => item.id !== pendingAssistantId && item.id !== optimisticUserId)));
         return null;
       }
+      // Genuine failure: the server never acknowledged the send, so no
+      // assistant id will ever arrive. Drop any pending cancel to avoid an
+      // orphaned cancel call against a future message.
+      pendingCancelRef.current.clear(conversationId);
       const message = err instanceof Error ? err.message : "Failed to send message";
       setError(message);
       setMessages((current) => sortMessages(current.filter((item) => item.id !== pendingAssistantId)));
@@ -841,7 +893,7 @@ export function useConversations(activeConversationId?: string | null) {
       }
       setIsSending(false);
     }
-  }, [activeDesignTask?.taskType, listConversations, loadConversation]);
+  }, [activeDesignTask?.taskType, cancelMessage, listConversations, loadConversation]);
 
   const getDesignTaskStarters = useCallback(async () => {
     const data = await apiJson<{ starters: DesignTaskStarter[] }>("/api/conversations/design-task-starters");
@@ -939,6 +991,14 @@ export function useConversations(activeConversationId?: string | null) {
         if (eventName === "message.created" || eventName === "message.updated" || eventName === "message.completed") {
           const incoming = streamMessageFromEvent(event as MessageEvent, eventName);
           if (incoming) {
+            if (
+              eventName === "message.created" &&
+              pendingCancelRef.current.claim(incoming.conversationId ?? activeConversationId, incoming)
+            ) {
+              // An early stop was recorded before the server message id was
+              // known; issue the server-side cancel now that it arrived.
+              void cancelMessage(incoming.conversationId ?? activeConversationId, incoming.id);
+            }
             setMessages((current) => upsertIncomingMessage(current, incoming));
           }
           return;
@@ -992,7 +1052,7 @@ export function useConversations(activeConversationId?: string | null) {
       if (reloadTimer !== null) window.clearTimeout(reloadTimer);
       stream.close();
     };
-  }, [activeConversationId, loadConversation]);
+  }, [activeConversationId, cancelMessage, loadConversation]);
 
   return useMemo(
     () => ({
