@@ -664,7 +664,8 @@ export function useConversations(activeConversationId?: string | null) {
       activeDesignTask?.id === taskId ? clientResolveTaskDomain(activeDesignTask.taskType) : null;
     const userInstruction = typeof input?.instruction === "string" ? input.instruction.trim() : "";
     const shouldShowUserBubble = input?.showInstructionBubble === true && userInstruction.length > 0;
-    const { showInstructionBubble: _showInstructionBubble, ...requestInput } = input ?? {};
+    const requestInput = { ...(input ?? {}) };
+    delete requestInput.showInstructionBubble;
     activeLocalMessageIdsRef.current = shouldShowUserBubble
       ? [optimisticUserId, pendingAssistantId]
       : [pendingAssistantId];

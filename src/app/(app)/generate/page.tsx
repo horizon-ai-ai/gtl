@@ -1395,11 +1395,10 @@ export default function GeneratePage() {
     };
   }, [activeGenerationResult, generationResultForMessage, isResultPanelOpen, workspaceMode]);
   const handleOpenGenerationResult = useCallback((message: ChatMessage) => {
-    const result = generationResultForMessage(message);
     setSelectedGenerationMessageId(message.id);
     setWorkspaceMode("generation");
     setIsResultPanelOpen(true);
-  }, [generationResultForMessage]);
+  }, []);
   const versionsForGenerationResult = useCallback((result: GenerationResultView | null) => {
     if (!result) return [];
     const threadId = generationThreadKey(result);
