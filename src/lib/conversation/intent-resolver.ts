@@ -8,7 +8,6 @@ export type UserIntentResult = {
   action: UserActionIntent;
   taskType: DesignTaskType | null;
   assetFamily: AssetFamily;
-  wantsGeneration: boolean;
   outputCount: number | null;
   confidence: number;
   reasoning: string;
@@ -104,7 +103,6 @@ function systemPrompt() {
     '  "action": "ask" | "refine" | "create_new" | "generate" | "cancel" | "chitchat",',
     '  "taskType": string | null,',
     '  "assetFamily": "visual" | "text" | "video" | "ad_production" | null,',
-    '  "wantsGeneration": boolean,',
     '  "outputCount": number | null,',
     '  "confidence": number,',
     '  "reasoning": string',
@@ -131,19 +129,19 @@ function systemPrompt() {
     '- "ask" means exploring, asking, or brainstorming.',
     "",
     "Important:",
-    "- If quickReplyAction is proceed_generate, action must be generate and wantsGeneration true.",
-    "- If quickReplyAction is choose_direction, the user is selecting a direction/angle, not approving final generation yet. Classify as refine or ask with wantsGeneration false unless the message also explicitly asks to generate now.",
-    "- If the user asks to generate/produce/create/show/output a version now, do not keep asking. Classify as generate and wantsGeneration true. Examples: 產生第一版, 生成一版, 直接做第一版, 幫我寫出來, 出三張圖, 生成三張 Logo.",
+    "- If quickReplyAction is proceed_generate, action must be generate.",
+    "- If quickReplyAction is choose_direction, the user is selecting a direction/angle, not approving final generation yet. Classify as refine or ask unless the message also explicitly asks to generate now.",
+    "- If the user asks to generate/produce/create/show/output a version now, do not keep asking. Classify as generate. Examples: 產生第一版, 生成一版, 直接做第一版, 幫我寫出來, 出三張圖, 生成三張 Logo.",
     "- If the user asks for multiple visual outputs, set outputCount to the requested count, capped at 4. Otherwise outputCount must be null.",
-    "- For text deliverables, distinguish advice from delivery: if the user asks the assistant to write, produce, generate, draft, output, or create the actual SEO article, social copy set, ad strategy, marketing plan, report, or other text artifact now, classify as generate, assetFamily text, wantsGeneration true.",
+    "- For text deliverables, distinguish advice from delivery: if the user asks the assistant to write, produce, generate, draft, output, or create the actual SEO article, social copy set, ad strategy, marketing plan, report, or other text artifact now, classify as generate, assetFamily text.",
     "- If the user only asks for topic ideas, direction options, research, examples, critique, or what they should prepare next, classify as ask, not generate.",
     "- Task switching is allowed inside one conversation. If activeTaskType is visual but the user asks for a text deliverable, switch to the text taskType; do not refine the visual task. If the user asks to produce the text now, action generate; if they only start briefing, action create_new.",
     "- If activeTaskType is text but the user asks for logo/VI/image/design output, switch to the visual taskType; do not refine the text task. If they ask to produce it now, action generate.",
-    "- If an active text task exists and the user supplies missing brief material without asking for the deliverable yet, classify as ask or refine with wantsGeneration false.",
-    "- If an active text task exists and the user asks to adjust a previous version, rewrite a section, keep the current structure, make it longer/shorter, or regenerate another version, classify as refine and set wantsGeneration true.",
+    "- If an active text task exists and the user supplies missing brief material without asking for the deliverable yet, classify as ask or refine.",
+    "- If an active text task exists and the user asks to adjust a previous version, rewrite a section, keep the current structure, make it longer/shorter, or regenerate another version, classify as refine.",
     "- If there is an active visual task and the user asks to see the actual visual output, classify as generate.",
-    "- If there is an active visual task and the user explicitly requests regeneration of an existing draft, classify as refine and set wantsGeneration true because the system must regenerate the visual.",
-    "- If there is an active visual task and the user only supplies missing brief material such as brand name, slogan, product name, reference notes, typography preference, colors, layout preference, or icons, classify as refine with wantsGeneration false unless they clearly ask to generate/regenerate/show the output now.",
+    "- If there is an active visual task and the user explicitly requests regeneration of an existing draft, classify as refine.",
+    "- If there is an active visual task and the user only supplies missing brief material such as brand name, slogan, product name, reference notes, typography preference, colors, layout preference, or icons, classify as refine unless they clearly ask to generate/regenerate/show the output now.",
     "- If the user is only asking for advice or options, classify as ask unless they clearly ask for output now.",
   ].join("\n");
 }
@@ -187,7 +185,6 @@ export async function inferConversationIntent(params: InferUserIntentParams): Pr
       action,
       taskType: normalizeTaskType(parsed.taskType),
       assetFamily: normalizeAssetFamily(parsed.assetFamily),
-      wantsGeneration: parsed.wantsGeneration === true || action === "generate",
       outputCount: normalizeOutputCount(parsed.outputCount),
       confidence: clamp01(parsed.confidence),
       reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",

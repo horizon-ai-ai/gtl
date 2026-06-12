@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { randomUUID } from "crypto";
 import { DesignTaskStatus, DesignTaskType, MessageRole, MessageType, type DesignTask, type Message, type Prisma } from "@prisma/client";
 
@@ -511,7 +512,6 @@ function shouldConfirmTaskSwitch(params: {
   if (!inferredTaskType || inferredTaskType === params.activeTask.task_type) return null;
   const action = params.inferredIntent?.action;
   const shouldGate =
-    params.inferredIntent?.wantsGeneration === true ||
     action === "generate" ||
     action === "create_new" ||
     action === "refine";
@@ -1553,11 +1553,11 @@ async function resolveRequestedTask(params: {
       return applyIntentOutputCount(params.activeTask, params.inferredIntent);
     }
     if (!shouldCreateFresh) {
-      const reusableStatuses = params.inferredIntent?.action === "refine" || params.inferredIntent?.wantsGeneration
+      const reusableStatuses = params.inferredIntent?.action === "refine" || params.inferredIntent?.action === "generate"
         ? [DesignTaskStatus.active, DesignTaskStatus.collecting, DesignTaskStatus.paused, DesignTaskStatus.completed]
         : [DesignTaskStatus.active, DesignTaskStatus.collecting, DesignTaskStatus.paused];
       const reusableTask =
-        params.inferredIntent?.action === "refine" || params.inferredIntent?.wantsGeneration
+        params.inferredIntent?.action === "refine" || params.inferredIntent?.action === "generate"
           ? await findReusableTaskByType({
               conversationId: params.conversationId,
               userId: params.userId,
@@ -2198,7 +2198,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       (directionChosen ||
       (forceGenerate ||
         forceRecommendation ||
-        (!openingReply && Boolean(task) && intent?.wantsGeneration === true)));
+        // Refine stays discuss-first BY DESIGN: the reply carries a generate
+        // confirmation quick action instead of dispatching regeneration.
+        (!openingReply && Boolean(task) && (intent?.action === "generate" || intent?.action === "refine"))));
     const openingQuickActions = openingReply
       ? buildOpeningQuickActions(task?.task_type, task?.id)
       : [];
@@ -2344,8 +2346,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // onto the same message once the search returns, and let the client
     // re-render the references section via SSE. Do not await this promise:
     // awaiting it makes the HTTP request look frozen until search finishes.
+    // Scheduled through the serverless runtime's lifecycle extension
+    // (waitUntil) so the settle survives the instance freezing at response
+    // return — a detached `void promise.then` is freezable on Vercel. Next
+    // 14.2 ships no `after()`; waitUntil hooks Vercel's request context and
+    // degrades to a plain detached continuation in local dev.
     if (intelligencePromise) {
-      void intelligencePromise.then(async (settled) => {
+      waitUntil(intelligencePromise.then(async (settled) => {
         if (settled) {
           const refreshed = await prisma.message.findUnique({ where: { id: assistantMessage.id } });
           const existingMetadata =
@@ -2386,7 +2393,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         }
       }).catch((error) => {
         console.warn("[conversations/:id/messages] marketing intelligence settle failed:", error);
-      });
+      }));
     }
 
     // Text + image generation now early-return through the dispatcher block

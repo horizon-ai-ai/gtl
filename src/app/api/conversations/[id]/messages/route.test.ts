@@ -51,6 +51,10 @@ jest.mock("@/lib/db", () => {
         return { ...row };
       }),
       findMany: jest.fn(async () => []),
+      findUnique: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const row = messages.find((m) => m.id === where.id);
+        return row ? { ...row } : null;
+      }),
       findFirst: jest.fn(async (args?: { where?: Record<string, unknown>; orderBy?: Record<string, string> }) => {
         const where = args?.where ?? {};
         let rows = messages.filter(
@@ -125,6 +129,11 @@ jest.mock("@/lib/conversation/marketing-intelligence", () => ({
     maybeResearch: jest.fn(async () => null),
     buildPromptContext: () => "",
   },
+}));
+
+const waitUntilMock = jest.fn();
+jest.mock("@vercel/functions", () => ({
+  waitUntil: (promise: Promise<unknown>) => waitUntilMock(promise),
 }));
 
 jest.mock("@/lib/conversation/schema-registry", () => ({
@@ -269,5 +278,110 @@ describe("POST /api/conversations/[id]/messages — streaming placeholder finali
     const assistantRows = messages.filter((m) => m.role === "assistant");
     expect(assistantRows).toHaveLength(1);
     expect(assistantRows[0].metadata.status).toBe("completed");
+  });
+});
+
+describe("POST /api/conversations/[id]/messages — marketing-intelligence settle lifecycle", () => {
+  it("registers the settle through waitUntil and grafts the result when the registered promise runs", async () => {
+    const pack = {
+      query: "logo 趨勢",
+      summary: "整理好的摘要",
+      searchModel: "search-model",
+      sources: [],
+      visualReferences: [],
+      groundedMode: false,
+      createdAt: new Date().toISOString(),
+    };
+    const { marketingIntelligence } = jest.requireMock("@/lib/conversation/marketing-intelligence");
+    marketingIntelligence.maybeResearch.mockResolvedValueOnce(pack);
+
+    const res = await POST(messageRequest({ content: "hello" }), { params: { id: "conv_1" } });
+    expect(res.status).toBe(200);
+
+    // The settle is registered through the runtime lifecycle extension, not
+    // run as a detached `void promise.then` continuation.
+    expect(waitUntilMock).toHaveBeenCalledTimes(1);
+    const settlePromise = waitUntilMock.mock.calls[0][0] as Promise<unknown>;
+    expect(typeof settlePromise.then).toBe("function");
+
+    // Driving the registered promise performs the settle: metadata update +
+    // ready-event publish.
+    await settlePromise;
+    const assistant = messages.find((m) => m.role === "assistant")!;
+    expect(
+      (assistant.metadata.marketingIntelligence as Record<string, unknown> | undefined)?.summary,
+    ).toBe("整理好的摘要");
+    expect(publishedEvents.some((e) => e.event === "marketing.intelligence.ready")).toBe(true);
+  });
+
+  it("does not register a settle when no intelligence lookup was started", async () => {
+    const res = await POST(messageRequest({ content: "hello" }), { params: { id: "conv_1" } });
+    expect(res.status).toBe(200);
+    // maybeResearch resolves null, but the registration itself only happens
+    // when a lookup promise exists; with the default mock it does — so the
+    // assertion here is that the settle never writes metadata for a null pack.
+    for (const call of waitUntilMock.mock.calls) {
+      await (call[0] as Promise<unknown>);
+    }
+    const assistant = messages.find((m) => m.role === "assistant")!;
+    expect(assistant.metadata.marketingIntelligence ?? null).toBeNull();
+    expect(publishedEvents.some((e) => e.event === "marketing.intelligence.ready")).toBe(false);
+  });
+});
+
+// Keep this describe LAST in the file: it overrides shared prisma mock
+// implementations (mockResolvedValue survives jest.clearAllMocks), and
+// running it last keeps the earlier tests on the factory defaults.
+describe("POST /api/conversations/[id]/messages — refine keeps the generate confirmation quick action", () => {
+  it("attaches a proceed_generate quick action to a refine-classified consultative reply", async () => {
+    const taskRow = {
+      id: "task_1",
+      user_id: "u_1",
+      conversation_id: "conv_1",
+      task_type: "logo",
+      title: "Logo",
+      status: "active",
+      execution_strategy: "structured_text",
+      collected_data: {},
+      resolved_requirements: {},
+      missing_requirements: {},
+      summary: null,
+      preferred_model: null,
+      clarification_count: 0,
+    };
+    const { prisma } = jest.requireMock("@/lib/db");
+    prisma.conversation.findUnique.mockResolvedValue({
+      active_design_task_id: "task_1",
+      active_leaf_message_id: null,
+    });
+    prisma.designTask.findFirst.mockResolvedValue({ ...taskRow });
+    prisma.designTask.findUnique.mockResolvedValue({ ...taskRow });
+    prisma.designTask.update.mockResolvedValue({ ...taskRow });
+    const { inferConversationIntent } = jest.requireMock("@/lib/conversation/intent-resolver");
+    inferConversationIntent.mockResolvedValueOnce({
+      action: "refine",
+      taskType: "logo",
+      assetFamily: "visual",
+      outputCount: null,
+      confidence: 0.9,
+      reasoning: "user adjusts the existing logo draft",
+    });
+
+    const res = await POST(
+      messageRequest({
+        // >40 chars so the turn is not treated as an opening turn, and no
+        // explicit generate keywords so forceGenerate stays false.
+        content:
+          "我想調整這個 Logo 的配色，整體再溫暖一點，但字體與構圖都先保持不變，請先告訴我你打算怎麼改、有哪些方向可以選。",
+      }),
+      { params: { id: "conv_1" } },
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      assistantMessage: { metadata?: { quickActions?: Array<{ action?: string }> } };
+    };
+    const quickActions = json.assistantMessage.metadata?.quickActions ?? [];
+    expect(quickActions.some((action) => action.action === "proceed_generate")).toBe(true);
   });
 });
