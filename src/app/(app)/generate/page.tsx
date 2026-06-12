@@ -28,6 +28,7 @@ import { PromptChips } from "@/components/ui/prompt-chips";
 import { DEFAULT_PROMPT_CHIPS } from "@/lib/chips/default-prompts";
 import { SiteRenderer } from "@/components/site-renderer";
 import { useConversations } from "@/hooks/useConversations";
+import { isEditWithinGenerationLineage } from "@/lib/conversation/edit-lineage";
 import { cleanTaskSummary } from "@/lib/project-brief";
 import type { SiteSchema } from "@/lib/site-builder";
 import type { ChatMessage, DesignTaskStarter, QuickAction } from "@/types/conversation";
@@ -1837,7 +1838,18 @@ export default function GeneratePage() {
       const conversationId = await ensureConversation(content.slice(0, 32));
       const targetResult = activeGenerationResult ?? latestGenerationResult;
       const targetTaskId = targetResult?.taskId || message.designTaskId || activeDesignTask?.id || null;
-      const shouldRegenerate = Boolean(targetResult?.messageId && targetTaskId);
+      // Paid regeneration only when the edited message belongs to the target
+      // generation's lineage (its instruction message or an ancestor on its
+      // branch path). Unrelated edits go through the plain edit path.
+      const shouldRegenerate = Boolean(
+        targetResult?.messageId &&
+          targetTaskId &&
+          isEditWithinGenerationLineage({
+            editedMessageId: message.id,
+            generation: targetResult,
+            messages,
+          }),
+      );
 
       if (shouldRegenerate) {
         setIsResultPanelOpen(true);

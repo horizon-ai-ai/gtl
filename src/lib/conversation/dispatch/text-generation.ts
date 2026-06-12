@@ -71,19 +71,24 @@ function textDeliverableInstruction(taskType: string) {
   }
 }
 
-function sourceTextFromPriorVersion(params: {
+export function sourceTextFromPriorVersion(params: {
   conversationId: string;
   taskId: string;
   sourceMessageId?: string | null;
   sourceVersionNumber?: number | null;
 }) {
   return (async () => {
+    // Only a generation_result may serve as the prior version. A user
+    // message id supplied as the source must never be injected as
+    // 被修改的前版內容 — with no qualifying result the dispatcher builds
+    // the creation prompt instead.
     const sourceMessage = params.sourceMessageId
       ? await prisma.message.findFirst({
           where: {
             id: params.sourceMessageId,
             conversation_id: params.conversationId,
             design_task_id: params.taskId,
+            message_type: "generation_result",
           },
           select: { metadata: true, content: true },
         })
@@ -126,6 +131,41 @@ function sourceTextFromPriorVersion(params: {
     }
     return "";
   })();
+}
+
+/**
+ * Pure prompt builder. With an empty `sourceText` (no qualifying
+ * generation_result), the creation prompt is built: no 被修改的前版內容
+ * block and no revision instructions.
+ */
+export function buildTextGenerationPrompt(params: {
+  task: Pick<DesignTask, "title" | "task_type" | "collected_data" | "resolved_requirements" | "missing_requirements">;
+  schemaDisplayName: string;
+  executionStrategy: string;
+  sourceText: string;
+  sourceVersionNumber?: number | null;
+  instruction: string;
+}) {
+  return [
+    `任務：${params.task.title}`,
+    `任務類型：${params.task.task_type}`,
+    `模板：${params.schemaDisplayName}`,
+    `交付策略：${params.executionStrategy}`,
+    `需求資料：${jsonSummary(params.task.collected_data)}`,
+    `已解析需求：${jsonSummary(params.task.resolved_requirements)}`,
+    `缺少需求：${jsonSummary(params.task.missing_requirements)}`,
+    params.sourceText && params.sourceVersionNumber
+      ? `本輪是針對第 ${params.sourceVersionNumber} 版做修改。`
+      : "",
+    params.sourceText ? `被修改的前版內容：\n${params.sourceText}` : "",
+    params.instruction ? `使用者本輪指令：${params.instruction}` : "",
+    `交付物規則：\n${textDeliverableInstruction(params.task.task_type)}`,
+    params.sourceText
+      ? "請輸出修正版完整成品。必須保留前版中使用者沒有要求修改的結構、語氣、段落與重點，只套用本輪指令要求的變更；不可改寫成 brief 或重新規劃。"
+      : "請直接輸出第一版完整成品，不要反問。資訊不足時用合理假設補齊，並清楚標註假設；不可輸出 brief、架構、大綱或下一步建議。",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export async function dispatchTextGeneration(params: DispatchTextGenerationParams) {
@@ -187,24 +227,14 @@ export async function dispatchTextGeneration(params: DispatchTextGenerationParam
     };
   }
 
-  const prompt = [
-    `任務：${params.task.title}`,
-    `任務類型：${params.task.task_type}`,
-    `模板：${schema.displayName}`,
-    `交付策略：${executionStrategy}`,
-    `需求資料：${jsonSummary(params.task.collected_data)}`,
-    `已解析需求：${jsonSummary(params.task.resolved_requirements)}`,
-    `缺少需求：${jsonSummary(params.task.missing_requirements)}`,
-    params.sourceVersionNumber ? `本輪是針對第 ${params.sourceVersionNumber} 版做修改。` : "",
-    sourceText ? `被修改的前版內容：\n${sourceText}` : "",
-    params.instruction ? `使用者本輪指令：${params.instruction}` : "",
-    `交付物規則：\n${textDeliverableInstruction(params.task.task_type)}`,
-    sourceText
-      ? "請輸出修正版完整成品。必須保留前版中使用者沒有要求修改的結構、語氣、段落與重點，只套用本輪指令要求的變更；不可改寫成 brief 或重新規劃。"
-      : "請直接輸出第一版完整成品，不要反問。資訊不足時用合理假設補齊，並清楚標註假設；不可輸出 brief、架構、大綱或下一步建議。",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const prompt = buildTextGenerationPrompt({
+    task: params.task,
+    schemaDisplayName: schema.displayName,
+    executionStrategy,
+    sourceText,
+    sourceVersionNumber: params.sourceVersionNumber,
+    instruction: params.instruction,
+  });
 
   const buildOutputGroup = (content: string) => ({
     kind: "text",
