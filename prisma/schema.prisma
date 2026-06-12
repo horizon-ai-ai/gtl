@@ -78,19 +78,24 @@ enum UserRole {
 }
 
 model CompanyProfile {
-  user_id         String   @id @db.Uuid
-  user            User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  tax_id          String   @unique
-  name            String
-  address         String
-  owner_name      String?
-  business_items  String[] @default([])
-  industry        String?
-  employee_size   String?
-  contact_name    String?
-  contact_phone   String?
-  verified        Boolean  @default(false)
-  verified_source String?
+  user_id          String   @id @db.Uuid
+  user             User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  tax_id           String   @unique
+  name             String
+  name_en          String?
+  address          String
+  owner_name       String?
+  business_items   String[] @default([])
+  industry         String?
+  employee_size    String?
+  contact_name     String?
+  contact_phone    String?
+  contact_email    String?
+  referral_sources String[] @default([])
+  website          String?
+  remarks          String?
+  verified         Boolean  @default(false)
+  verified_source  String?
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
 
@@ -767,6 +772,7 @@ model TradeProfile {
   target_markets     String[]  @default([])
   budget_range       String?
   capacity           String?
+  company_info       Json?
   verified           Boolean   @default(false)
   created_at         DateTime  @default(now())
   updated_at         DateTime  @updatedAt

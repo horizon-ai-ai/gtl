@@ -209,9 +209,20 @@ export default async function AdminUserDetailPage({ params }: { params: { id: st
               <div className="text-sm font-medium">公司資料</div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                 <div>公司名：{user.company.name}</div>
+                <div>英文名稱：{user.company.name_en ?? "—"}</div>
                 <div>統編：{user.company.tax_id}</div>
                 <div>地址：{user.company.address}</div>
+                <div>產業：{user.company.industry ?? "—"}</div>
+                <div>聯絡人：{user.company.contact_name ?? "—"}</div>
+                <div>聯絡電話：{user.company.contact_phone ?? "—"}</div>
+                <div>聯絡人信箱：{user.company.contact_email ?? "—"}</div>
+                <div>
+                  得知管道：
+                  {user.company.referral_sources.length ? user.company.referral_sources.join("、") : "—"}
+                </div>
+                <div>官方網站：{user.company.website ?? "—"}</div>
                 <div>驗證：{user.company.verified ? "是" : "否"}</div>
+                {user.company.remarks ? <div className="col-span-2">備註：{user.company.remarks}</div> : null}
               </div>
             </div>
           ) : null}

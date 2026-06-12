@@ -12,10 +12,30 @@ const STATUS_LABEL: Record<string, string> = {
   closed: "已關閉",
 };
 
+const STATUS_STYLE: Record<string, string> = {
+  open: "bg-amber-100 text-amber-700",
+  in_progress: "bg-blue-100 text-blue-700",
+  resolved: "bg-emerald-100 text-emerald-700",
+  closed: "bg-neutral-100 text-neutral-500",
+};
+
+const STATUS_ORDER: Record<string, number> = { open: 0, in_progress: 1, resolved: 2, closed: 3 };
+
+const PRIORITY_LABEL: Record<string, string> = {
+  low: "低",
+  normal: "中",
+  high: "高",
+};
+
 const PRIORITY_STYLE: Record<string, string> = {
   low: "bg-neutral-100 text-neutral-700",
   normal: "bg-blue-100 text-blue-700",
   high: "bg-amber-100 text-amber-700",
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  order_support: "訂單協助",
+  trade_inquiry: "貿易詢價",
 };
 
 async function assignTicket(formData: FormData) {
@@ -98,6 +118,11 @@ export default async function AdminSupportPage() {
     : [];
   const userMap = new Map(users.map((user) => [user.id, user]));
   const adminMap = new Map(admins.map((user) => [user.id, user]));
+  const sortedTickets = [...tickets].sort((a, b) => {
+    const statusDiff = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9);
+    if (statusDiff !== 0) return statusDiff;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
 
   return (
     <div className="p-8 space-y-6">
@@ -114,97 +139,100 @@ export default async function AdminSupportPage() {
         </Card>
       </div>
 
-      <Card>
-        <table className="w-full text-sm">
-          <thead className="border-b bg-neutral-50">
-            <tr>
-              <th className="text-left p-3">建立時間</th>
-              <th className="text-left p-3">用戶</th>
-              <th className="text-left p-3">主旨</th>
-              <th className="text-left p-3">分類</th>
-              <th className="text-left p-3">來源</th>
-              <th className="text-left p-3">優先度</th>
-              <th className="text-left p-3">負責人</th>
-              <th className="text-left p-3">狀態</th>
-              <th className="text-left p-3">內容</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map((ticket) => {
-              const user = userMap.get(ticket.user_id);
-              const assignee = ticket.assignee_admin_id ? adminMap.get(ticket.assignee_admin_id) : null;
-              const source = inferSupportSource(ticket);
-              return (
-                <tr key={ticket.id} className="border-b last:border-0 align-top">
-                  <td className="p-3 text-neutral-500 whitespace-nowrap">
-                    {new Date(ticket.created_at).toLocaleString()}
-                  </td>
-                  <td className="p-3">
-                    <div className="font-medium">{user?.display_name ?? "未命名用戶"}</div>
-                    <div className="text-xs text-neutral-500">{user?.email ?? ticket.user_id}</div>
-                  </td>
-                  <td className="p-3 font-medium">
-                    <Link href={`/admin/support/${ticket.id}`} className="hover:underline">
+      <div className="space-y-3">
+        {sortedTickets.length === 0 ? (
+          <Card className="p-8 text-sm text-neutral-500">目前沒有工單。</Card>
+        ) : null}
+        {sortedTickets.map((ticket) => {
+          const user = userMap.get(ticket.user_id);
+          const assignee = ticket.assignee_admin_id ? adminMap.get(ticket.assignee_admin_id) : null;
+          const source = inferSupportSource(ticket);
+          const body = ticket.body ?? "";
+          const preview = body.replace(/\s+/g, " ").trim();
+          return (
+            <Card key={ticket.id} className="p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link href={`/admin/support/${ticket.id}`} className="font-medium hover:underline">
                       {ticket.subject}
                     </Link>
-                  </td>
-                  <td className="p-3">{ticket.category}</td>
-                  <td className="p-3">
-                    <div className="text-sm">{source.type}</div>
-                    {source.href ? (
-                      <Link href={source.href} className="text-xs text-neutral-500 underline">
-                        查看來源
-                      </Link>
-                    ) : null}
-                  </td>
-                  <td className="p-3">
                     <span
-                      className={`inline-flex rounded px-2 py-1 text-xs ${
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        STATUS_STYLE[ticket.status] ?? STATUS_STYLE.open
+                      }`}
+                    >
+                      {STATUS_LABEL[ticket.status] ?? ticket.status}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                         PRIORITY_STYLE[ticket.priority] ?? PRIORITY_STYLE.normal
                       }`}
                     >
-                      {ticket.priority}
+                      優先度 {PRIORITY_LABEL[ticket.priority] ?? ticket.priority}
                     </span>
-                  </td>
-                  <td className="p-3 min-w-44">
-                    <div className="text-sm">{assignee?.display_name ?? assignee?.email ?? "未指派"}</div>
-                    <form action={assignTicket} className="mt-2">
-                      <input type="hidden" name="ticket_id" value={ticket.id} />
-                      <button
-                        type="submit"
-                        className="rounded border px-2 py-1 text-xs hover:bg-neutral-50"
-                        disabled={ticket.assignee_admin_id === admin.id}
-                      >
-                        {ticket.assignee_admin_id === admin.id ? "已指派給我" : "指派給我"}
-                      </button>
-                    </form>
-                  </td>
-                  <td className="p-3 min-w-44">
-                    <div className="text-sm mb-2">{STATUS_LABEL[ticket.status] ?? ticket.status}</div>
-                    <form action={updateTicketStatus} className="flex gap-2">
-                      <input type="hidden" name="ticket_id" value={ticket.id} />
-                      <select
-                        name="status"
-                        defaultValue={ticket.status}
-                        className="rounded border bg-white px-2 py-1 text-xs"
-                      >
-                        <option value="open">待處理</option>
-                        <option value="in_progress">處理中</option>
-                        <option value="resolved">已解決</option>
-                        <option value="closed">已關閉</option>
-                      </select>
-                      <button type="submit" className="rounded border px-2 py-1 text-xs hover:bg-neutral-50">
-                        更新
-                      </button>
-                    </form>
-                  </td>
-                  <td className="p-3 whitespace-pre-wrap text-neutral-600 max-w-xl">{ticket.body}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Card>
+                    <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
+                      {CATEGORY_LABEL[ticket.category] ?? ticket.category}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+                    <span>{new Date(ticket.created_at).toLocaleString()}</span>
+                    <span>
+                      {user?.display_name ?? "未命名用戶"}（{user?.email ?? ticket.user_id}）
+                    </span>
+                    <span>負責人：{assignee?.display_name ?? assignee?.email ?? "未指派"}</span>
+                    {source.href ? (
+                      <Link href={source.href} className="underline underline-offset-2">
+                        查看來源（{source.type}）
+                      </Link>
+                    ) : (
+                      <span>來源：{source.type}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <form action={assignTicket}>
+                    <input type="hidden" name="ticket_id" value={ticket.id} />
+                    <button
+                      type="submit"
+                      className="rounded border px-3 py-1.5 text-xs hover:bg-neutral-50 disabled:opacity-50"
+                      disabled={ticket.assignee_admin_id === admin.id}
+                    >
+                      {ticket.assignee_admin_id === admin.id ? "已指派給我" : "指派給我"}
+                    </button>
+                  </form>
+                  <form action={updateTicketStatus} className="flex items-center gap-2">
+                    <input type="hidden" name="ticket_id" value={ticket.id} />
+                    <select
+                      name="status"
+                      defaultValue={ticket.status}
+                      className="rounded border bg-white px-2 py-1.5 text-xs"
+                    >
+                      <option value="open">待處理</option>
+                      <option value="in_progress">處理中</option>
+                      <option value="resolved">已解決</option>
+                      <option value="closed">已關閉</option>
+                    </select>
+                    <button type="submit" className="rounded border px-3 py-1.5 text-xs hover:bg-neutral-50">
+                      更新
+                    </button>
+                  </form>
+                </div>
+              </div>
+              {body ? (
+                <details className="mt-3 rounded-md bg-neutral-50 text-sm text-neutral-700">
+                  <summary className="cursor-pointer select-none px-3 py-2 text-neutral-600">
+                    <span className="text-xs text-neutral-400">內容</span>{" "}
+                    {preview.slice(0, 90)}
+                    {preview.length > 90 ? "…（展開全文）" : ""}
+                  </summary>
+                  <div className="whitespace-pre-wrap border-t border-neutral-200 px-3 py-2">{body}</div>
+                </details>
+              ) : null}
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

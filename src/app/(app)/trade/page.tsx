@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { REFERRAL_OPTIONS } from "@/lib/company-options";
 
 type TradeRole = "seller";
 
@@ -28,7 +29,20 @@ type TradeProfile = {
   target_markets: string[];
   budget_range: string | null;
   capacity: string | null;
+  company_info?: Record<string, unknown> | null;
   verified?: boolean;
+} | null;
+
+type RegisteredCompany = {
+  name: string;
+  name_en: string | null;
+  tax_id: string;
+  address: string;
+  industry: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  website: string | null;
 } | null;
 
 type TradeAccess = {
@@ -130,14 +144,49 @@ const EMPTY_PROFILE = {
   target_markets: "",
   budget_range: "",
   capacity: "",
+  company_name: "",
+  company_name_en: "",
+  tax_id: "",
+  company_address: "",
+  industry: "",
+  contact_name: "",
+  contact_phone: "",
+  contact_email: "",
+  referral_sources: [] as string[],
+  website: "",
+  remarks: "",
+  bank_account_name: "",
+  bank_account_number: "",
+  bank_swift_code: "",
+  bank_passbook_image: "",
+  contract_agreed: false,
 };
+
+const SPEC_MATRIX_COLUMNS = [
+  { title: "規格一", hint: "EX：最小規格 25入/盒" },
+  { title: "規格二", hint: "EX：成箱規格 48入/箱" },
+  { title: "規格三", hint: "EX：成板規格 36箱/板" },
+];
+
+const SPEC_MATRIX_ROWS = [
+  { key: "price_usd", label: "單價：USD" },
+  { key: "dimensions_cm", label: "長、寬、高（CM）" },
+  { key: "net_weight_kg", label: "淨重（KG）" },
+  { key: "gross_weight_kg", label: "毛重（KG）" },
+] as const;
+
+const EMPTY_SPEC_MATRIX = SPEC_MATRIX_COLUMNS.map(() => ({
+  price_usd: "",
+  dimensions_cm: "",
+  net_weight_kg: "",
+  gross_weight_kg: "",
+}));
 
 const EMPTY_PRODUCT = {
   name: "",
   description: "",
   category: "",
   hs_code: "",
-  price_fob_usd: "",
   origin_country: "",
   brand: "",
   english_name: "",
@@ -153,19 +202,14 @@ const EMPTY_PRODUCT = {
   permit_no: "",
   return_policy: "",
   warranty_policy: "",
-  tax_category: "",
-  original_price: "",
-  promo_price: "",
   special_spec_enabled: false,
+  spec_matrix: EMPTY_SPEC_MATRIX,
   unit_length_cm: "",
   unit_width_cm: "",
   unit_height_cm: "",
   unit_weight_kg: "",
   carton_quantity: "",
-  carton_net_weight_kg: "",
-  carton_gross_weight_kg: "",
   storage_days: "",
-  storage_unit: "",
   storage_method: "",
   temp_control: "no",
   feature_description: "",
@@ -178,7 +222,6 @@ const EMPTY_PRODUCT = {
   marketing_claim: "",
   liability_insurance: "",
   food_registration_no: "",
-  commission_rate: "",
   certifications: "",
   linked_site_id: "",
   linked_site_url: "",
@@ -242,6 +285,49 @@ export default function TradePage() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [analyzingImages, setAnalyzingImages] = useState(false);
   const [filters, setFilters] = useState<TradeFilters>({ q: "", category: "", hs_code: "" });
+  const [registeredCompany, setRegisteredCompany] = useState<RegisteredCompany>(null);
+  const [uploadingPassbook, setUploadingPassbook] = useState(false);
+  const [profileTaxLookup, setProfileTaxLookup] = useState<
+    "idle" | "invalid" | "loading" | "success" | "not_found" | "error"
+  >("idle");
+
+  useEffect(() => {
+    const taxId = profileForm.tax_id.trim();
+    if (!taxId) {
+      setProfileTaxLookup("idle");
+      return;
+    }
+    if (!/^\d{8}$/.test(taxId)) {
+      setProfileTaxLookup("invalid");
+      return;
+    }
+    // 註冊資料已涵蓋同一統編時不需重查
+    if (registeredCompany && registeredCompany.tax_id === taxId) {
+      setProfileTaxLookup("idle");
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setProfileTaxLookup("loading");
+      try {
+        const res = await fetch(`/api/auth/lookup-tax-id?id=${taxId}`);
+        const json = await res.json();
+        if (json.data?.source === "gcis") {
+          setProfileForm((v) => ({
+            ...v,
+            company_name: json.data.name || v.company_name,
+            company_address: json.data.address || v.company_address,
+          }));
+          setProfileTaxLookup("success");
+        } else {
+          setProfileTaxLookup(res.ok ? "not_found" : "error");
+        }
+      } catch {
+        setProfileTaxLookup("error");
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileForm.tax_id, registeredCompany]);
 
   useEffect(() => {
     void (async () => {
@@ -255,11 +341,35 @@ export default function TradePage() {
         loadProducts(nextAccess.seller_allowed),
         loadInquiries("sent"),
         loadInquiries("received"),
+        loadRegisteredCompany(),
         ...(nextAccess.seller_allowed ? [loadSellerSites()] : []),
       ]);
       setLoading(false);
     })();
   }, []);
+
+  async function loadRegisteredCompany() {
+    const res = await fetch("/api/auth/me");
+    if (!res.ok) return;
+    const json = await res.json();
+    setRegisteredCompany((json.data?.company ?? null) as RegisteredCompany);
+  }
+
+  function applyRegisteredCompany() {
+    if (!registeredCompany) return;
+    setProfileForm((v) => ({
+      ...v,
+      company_name: registeredCompany.name || v.company_name,
+      company_name_en: registeredCompany.name_en || v.company_name_en,
+      tax_id: registeredCompany.tax_id || v.tax_id,
+      company_address: registeredCompany.address || v.company_address,
+      industry: registeredCompany.industry || v.industry,
+      contact_name: registeredCompany.contact_name || v.contact_name,
+      contact_phone: registeredCompany.contact_phone || v.contact_phone,
+      contact_email: registeredCompany.contact_email || v.contact_email,
+      website: registeredCompany.website || v.website,
+    }));
+  }
 
   async function loadAccess() {
     const res = await fetch("/api/trade/access");
@@ -280,6 +390,8 @@ export default function TradePage() {
     const nextProfile = (json.data ?? null) as TradeProfile;
     setProfile(nextProfile);
     if (nextProfile) {
+      const info = (nextProfile.company_info ?? {}) as Record<string, unknown>;
+      const infoText = (key: string) => (typeof info[key] === "string" ? (info[key] as string) : "");
       setProfileForm({
         role: nextProfile.role,
         description: nextProfile.description ?? "",
@@ -287,6 +399,24 @@ export default function TradePage() {
         target_markets: nextProfile.target_markets.join(", "),
         budget_range: nextProfile.budget_range ?? "",
         capacity: nextProfile.capacity ?? "",
+        company_name: infoText("company_name"),
+        company_name_en: infoText("company_name_en"),
+        tax_id: infoText("tax_id"),
+        company_address: infoText("company_address"),
+        industry: infoText("industry"),
+        contact_name: infoText("contact_name"),
+        contact_phone: infoText("contact_phone"),
+        contact_email: infoText("contact_email"),
+        referral_sources: Array.isArray(info.referral_sources)
+          ? (info.referral_sources as unknown[]).filter((item): item is string => typeof item === "string")
+          : [],
+        website: infoText("website"),
+        remarks: infoText("remarks"),
+        bank_account_name: infoText("bank_account_name"),
+        bank_account_number: infoText("bank_account_number"),
+        bank_swift_code: infoText("bank_swift_code"),
+        bank_passbook_image: infoText("bank_passbook_image"),
+        contract_agreed: info.contract_agreed === true,
       });
     }
   }
@@ -341,8 +471,27 @@ export default function TradePage() {
     else setReceivedInquiries(json.data ?? []);
   }
 
+  async function uploadPassbook(file: File) {
+    setUploadingPassbook(true);
+    setStatus(null);
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/trade/profile/passbook", { method: "POST", body: formData });
+    const json = await res.json();
+    setUploadingPassbook(false);
+    if (!res.ok) {
+      setStatus(json.error?.message ?? "存摺照片上傳失敗");
+      return;
+    }
+    setProfileForm((v) => ({ ...v, bank_passbook_image: json.data?.url ?? "" }));
+  }
+
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
+    if (profileForm.referral_sources.length === 0) {
+      setStatus("請至少勾選一項「如何知道此系統服務」");
+      return;
+    }
     setSavingProfile(true);
     setStatus(null);
 
@@ -356,6 +505,24 @@ export default function TradePage() {
         target_markets: splitCsv(profileForm.target_markets),
         budget_range: profileForm.budget_range || undefined,
         capacity: profileForm.capacity || undefined,
+        company_info: {
+          company_name: profileForm.company_name,
+          company_name_en: profileForm.company_name_en,
+          tax_id: profileForm.tax_id,
+          company_address: profileForm.company_address,
+          industry: profileForm.industry,
+          contact_name: profileForm.contact_name,
+          contact_phone: profileForm.contact_phone,
+          contact_email: profileForm.contact_email,
+          referral_sources: profileForm.referral_sources,
+          website: profileForm.website || undefined,
+          remarks: profileForm.remarks || undefined,
+          bank_account_name: profileForm.bank_account_name || undefined,
+          bank_account_number: profileForm.bank_account_number || undefined,
+          bank_swift_code: profileForm.bank_swift_code || undefined,
+          bank_passbook_image: profileForm.bank_passbook_image || undefined,
+          contract_agreed: profileForm.contract_agreed,
+        },
       }),
     });
 
@@ -398,9 +565,9 @@ export default function TradePage() {
         permit_no: productForm.permit_no || undefined,
         return_policy: productForm.return_policy || undefined,
         warranty_policy: productForm.warranty_policy || undefined,
-        tax_category: productForm.tax_category || undefined,
-        original_price: productForm.original_price || undefined,
-        promo_price: productForm.promo_price || undefined,
+        spec_matrix: productForm.spec_matrix.some((column) => Object.values(column).some(Boolean))
+          ? productForm.spec_matrix
+          : undefined,
         special_spec_enabled: productForm.special_spec_enabled,
         special_variants: productForm.special_spec_enabled
           ? specialVariants
@@ -417,10 +584,7 @@ export default function TradePage() {
         unit_height_cm: productForm.unit_height_cm || undefined,
         unit_weight_kg: productForm.unit_weight_kg || undefined,
         carton_quantity: productForm.carton_quantity || undefined,
-        carton_net_weight_kg: productForm.carton_net_weight_kg || undefined,
-        carton_gross_weight_kg: productForm.carton_gross_weight_kg || undefined,
         storage_days: productForm.storage_days || undefined,
-        storage_unit: productForm.storage_unit || undefined,
         storage_method: productForm.storage_method || undefined,
         temp_control: productForm.temp_control || undefined,
         feature_description: productForm.feature_description || undefined,
@@ -433,12 +597,11 @@ export default function TradePage() {
         marketing_claim: productForm.marketing_claim || undefined,
         liability_insurance: productForm.liability_insurance || undefined,
         food_registration_no: productForm.food_registration_no || undefined,
-        commission_rate: productForm.commission_rate || undefined,
         linked_site_id: productForm.linked_site_id || undefined,
         linked_site_url: productForm.linked_site_url || undefined,
         ...draftAttributes,
       },
-      price_fob_usd: parseOptionalInt(productForm.price_fob_usd),
+      price_fob_usd: parseOptionalInt(productForm.spec_matrix[0]?.price_usd ?? ""),
       origin_country: productForm.origin_country || undefined,
       certifications: splitCsv(productForm.certifications),
       status: productForm.status,
@@ -485,7 +648,6 @@ export default function TradePage() {
       description: product.description ?? "",
       category: product.category ?? "",
       hs_code: product.hs_code ?? readSpec(product.specs, "hs_code"),
-      price_fob_usd: product.price_min == null ? "" : String(product.price_min),
       origin_country: product.origin_country ?? "",
       brand: readSpec(product.specs, "brand"),
       english_name: readSpec(product.specs, "english_name"),
@@ -501,19 +663,14 @@ export default function TradePage() {
       permit_no: readSpec(product.specs, "permit_no"),
       return_policy: readSpec(product.specs, "return_policy"),
       warranty_policy: readSpec(product.specs, "warranty_policy"),
-      tax_category: readSpec(product.specs, "tax_category"),
-      original_price: readSpec(product.specs, "original_price"),
-      promo_price: readSpec(product.specs, "promo_price"),
+      spec_matrix: readSpecMatrix(product.specs, product.price_min),
       special_spec_enabled: readSpecBool(product.specs, "special_spec_enabled"),
       unit_length_cm: readSpec(product.specs, "unit_length_cm"),
       unit_width_cm: readSpec(product.specs, "unit_width_cm"),
       unit_height_cm: readSpec(product.specs, "unit_height_cm"),
       unit_weight_kg: readSpec(product.specs, "unit_weight_kg"),
       carton_quantity: readSpec(product.specs, "carton_quantity"),
-      carton_net_weight_kg: readSpec(product.specs, "carton_net_weight_kg"),
-      carton_gross_weight_kg: readSpec(product.specs, "carton_gross_weight_kg"),
       storage_days: readSpec(product.specs, "storage_days"),
-      storage_unit: readSpec(product.specs, "storage_unit"),
       storage_method: readSpec(product.specs, "storage_method"),
       temp_control: readSpec(product.specs, "temp_control") || "no",
       feature_description: readSpec(product.specs, "feature_description"),
@@ -526,7 +683,6 @@ export default function TradePage() {
       marketing_claim: readSpec(product.specs, "marketing_claim"),
       liability_insurance: readSpec(product.specs, "liability_insurance"),
       food_registration_no: readSpec(product.specs, "food_registration_no"),
-      commission_rate: readSpec(product.specs, "commission_rate"),
       linked_site_id: readSpec(product.specs, "linked_site_id"),
       linked_site_url: readSpec(product.specs, "linked_site_url"),
       certifications: (product.certifications ?? []).join(", "),
@@ -1406,7 +1562,7 @@ export default function TradePage() {
                           <Input
                             value={productForm.product_spec_text}
                             onChange={(e) => setProductForm((v) => ({ ...v, product_spec_text: e.target.value }))}
-                            placeholder="例如：14片 x 3包 x 1件"
+                            placeholder="25包一盒，48盒一箱，36箱一板"
                             required
                           />
                         </Field>
@@ -1415,14 +1571,6 @@ export default function TradePage() {
                             value={productForm.quantity_range}
                             onChange={(e) => setProductForm((v) => ({ ...v, quantity_range: e.target.value }))}
                             placeholder="例如：100-500 箱 / 1,000 件以上"
-                            required
-                          />
-                        </Field>
-                        <Field label="單價 USD（必填）">
-                          <Input
-                            value={productForm.price_fob_usd}
-                            onChange={(e) => setProductForm((v) => ({ ...v, price_fob_usd: e.target.value }))}
-                            placeholder="例如：12"
                             required
                           />
                         </Field>
@@ -1475,20 +1623,53 @@ export default function TradePage() {
                           />
                         </Field>
                       </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="箱重（淨重 KG）">
-                          <Input
-                            value={productForm.carton_net_weight_kg}
-                            onChange={(e) => setProductForm((v) => ({ ...v, carton_net_weight_kg: e.target.value }))}
-                          />
-                        </Field>
-                        <Field label="箱重（毛重 KG）">
-                          <Input
-                            value={productForm.carton_gross_weight_kg}
-                            onChange={(e) => setProductForm((v) => ({ ...v, carton_gross_weight_kg: e.target.value }))}
-                          />
-                        </Field>
-                      </div>
+                      <Field label="規格價格與包裝（規格一必填單價）">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr>
+                                <th className="w-36 border border-neutral-300 bg-neutral-50 px-3 py-2 text-left font-medium text-neutral-700">
+                                  商品
+                                </th>
+                                {SPEC_MATRIX_COLUMNS.map((column) => (
+                                  <th
+                                    key={column.title}
+                                    className="border border-neutral-300 bg-neutral-50 px-3 py-2 text-left font-medium text-neutral-700"
+                                  >
+                                    {column.title}
+                                    <div className="text-xs font-normal text-neutral-500">{column.hint}</div>
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {SPEC_MATRIX_ROWS.map((row) => (
+                                <tr key={row.key}>
+                                  <td className="border border-neutral-300 bg-neutral-50 px-3 py-2 text-neutral-700">
+                                    {row.label}
+                                  </td>
+                                  {productForm.spec_matrix.map((column, index) => (
+                                    <td key={`${row.key}-${index}`} className="border border-neutral-300 px-2 py-2">
+                                      <Input
+                                        value={column[row.key]}
+                                        onChange={(e) =>
+                                          setProductForm((v) => ({
+                                            ...v,
+                                            spec_matrix: v.spec_matrix.map((item, itemIndex) =>
+                                              itemIndex === index ? { ...item, [row.key]: e.target.value } : item
+                                            ),
+                                          }))
+                                        }
+                                        required={row.key === "price_usd" && index === 0}
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Field>
                     </FormSection>
 
                     <FormSection
@@ -1541,24 +1722,6 @@ export default function TradePage() {
                               ) : null}
                             </div>
                           </div>
-                        </Field>
-                        <Field label="應免稅/稅別">
-                          <Input
-                            value={productForm.tax_category}
-                            onChange={(e) => setProductForm((v) => ({ ...v, tax_category: e.target.value }))}
-                          />
-                        </Field>
-                        <Field label="原價">
-                          <Input
-                            value={productForm.original_price}
-                            onChange={(e) => setProductForm((v) => ({ ...v, original_price: e.target.value }))}
-                          />
-                        </Field>
-                        <Field label="促銷價">
-                          <Input
-                            value={productForm.promo_price}
-                            onChange={(e) => setProductForm((v) => ({ ...v, promo_price: e.target.value }))}
-                          />
                         </Field>
                       </div>
                     </FormSection>
@@ -1663,18 +1826,12 @@ export default function TradePage() {
                           required
                         />
                       </Field>
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <Field label="保存日期">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="保存效期">
                           <Input
                             value={productForm.storage_days}
                             onChange={(e) => setProductForm((v) => ({ ...v, storage_days: e.target.value }))}
-                          />
-                        </Field>
-                        <Field label="保存日期單位">
-                          <Input
-                            value={productForm.storage_unit}
-                            onChange={(e) => setProductForm((v) => ({ ...v, storage_unit: e.target.value }))}
-                            placeholder="例如：日 / 月 / 年"
+                            placeholder="36個月"
                           />
                         </Field>
                         <Field label="保存方式">
@@ -1750,20 +1907,12 @@ export default function TradePage() {
                           />
                         </Field>
                       </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <Field label="素食種類">
-                          <Input
-                            value={productForm.vegetarian_type}
-                            onChange={(e) => setProductForm((v) => ({ ...v, vegetarian_type: e.target.value }))}
-                          />
-                        </Field>
-                        <Field label="佣金比例（%）">
-                          <Input
-                            value={productForm.commission_rate}
-                            onChange={(e) => setProductForm((v) => ({ ...v, commission_rate: e.target.value }))}
-                          />
-                        </Field>
-                      </div>
+                      <Field label="素食種類">
+                        <Input
+                          value={productForm.vegetarian_type}
+                          onChange={(e) => setProductForm((v) => ({ ...v, vegetarian_type: e.target.value }))}
+                        />
+                      </Field>
                       <Field label="產品成份及食品添加物">
                         <TradeTextarea
                           value={productForm.ingredients}
@@ -2037,14 +2186,192 @@ export default function TradePage() {
                 <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-700">
                   目前申請類型：<span className="font-medium uppercase">seller</span>
                 </div>
-                <Field label="公司 / 貿易簡介">
+                {registeredCompany ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700">
+                    <span>
+                      你註冊時選擇公司身份（{registeredCompany.name}），可直接帶入公司註冊資訊。
+                    </span>
+                    <Button type="button" variant="outline" size="sm" onClick={applyRegisteredCompany}>
+                      帶入公司註冊資訊
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-600">
+                    你註冊時選擇一般個人身份，請於下方欄位填寫公司資訊。
+                  </div>
+                )}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="公司名稱（必填）">
+                    <Input
+                      value={profileForm.company_name}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, company_name: e.target.value }))}
+                      placeholder="請填寫經濟部商工登記公司全名，例如：xxxx有限公司"
+                      required
+                    />
+                  </Field>
+                  <Field label="公司英文名稱（必填）">
+                    <Input
+                      value={profileForm.company_name_en}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, company_name_en: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                  <Field label="營利統編（必填）">
+                    <div className="space-y-1">
+                      <Input
+                        value={profileForm.tax_id}
+                        onChange={(e) => setProfileForm((v) => ({ ...v, tax_id: e.target.value }))}
+                        placeholder="例如：12345678"
+                        maxLength={8}
+                        required
+                      />
+                      {profileTaxLookup === "loading" ? (
+                        <p className="text-xs text-neutral-500">查詢商工登記資料中...</p>
+                      ) : null}
+                      {profileTaxLookup === "invalid" ? (
+                        <p className="text-xs text-amber-600">統編需為 8 碼，輸入後會自動帶入公司資料。</p>
+                      ) : null}
+                      {profileTaxLookup === "success" ? (
+                        <p className="text-xs text-emerald-600">已自動帶入商工登記的公司名稱與地址，可再調整。</p>
+                      ) : null}
+                      {profileTaxLookup === "not_found" ? (
+                        <p className="text-xs text-amber-600">查無公司資料，請自行填寫公司名稱與地址。</p>
+                      ) : null}
+                      {profileTaxLookup === "error" ? (
+                        <p className="text-xs text-red-600">統編查詢失敗，請自行填寫或稍後再試。</p>
+                      ) : null}
+                    </div>
+                  </Field>
+                  <Field label="公司產業（必填）">
+                    <Input
+                      value={profileForm.industry}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, industry: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                </div>
+                <Field label="公司地址（必填）">
+                  <Input
+                    value={profileForm.company_address}
+                    onChange={(e) => setProfileForm((v) => ({ ...v, company_address: e.target.value }))}
+                    placeholder="例如：xxx市xxxx區xxxxxxx路"
+                    required
+                  />
+                </Field>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field label="公司聯絡人姓名（必填）">
+                    <Input
+                      value={profileForm.contact_name}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, contact_name: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                  <Field label="公司聯絡電話（必填）">
+                    <Input
+                      value={profileForm.contact_phone}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, contact_phone: e.target.value }))}
+                      placeholder="請填寫區域代碼、勿使用符號"
+                      required
+                    />
+                  </Field>
+                  <Field label="公司聯絡人信箱（必填）">
+                    <Input
+                      type="email"
+                      value={profileForm.contact_email}
+                      onChange={(e) => setProfileForm((v) => ({ ...v, contact_email: e.target.value }))}
+                      placeholder="相關服務資訊將寄送到此信箱"
+                      required
+                    />
+                  </Field>
+                </div>
+                <Field label="如何知道此系統服務？（可多選，必填）">
+                  <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                    {REFERRAL_OPTIONS.map((option) => (
+                      <label key={option} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={profileForm.referral_sources.includes(option)}
+                          onChange={(e) =>
+                            setProfileForm((v) => ({
+                              ...v,
+                              referral_sources: e.target.checked
+                                ? [...v.referral_sources, option]
+                                : v.referral_sources.filter((item) => item !== option),
+                            }))
+                          }
+                        />
+                        {option}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="公司官方網站">
+                  <Input
+                    value={profileForm.website}
+                    onChange={(e) => setProfileForm((v) => ({ ...v, website: e.target.value }))}
+                    placeholder="請輸入網址，若無請跳過"
+                  />
+                </Field>
+                <Field label="備註">
+                  <textarea
+                    value={profileForm.remarks}
+                    onChange={(e) => setProfileForm((v) => ({ ...v, remarks: e.target.value }))}
+                    className="min-h-20 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                  />
+                </Field>
+                <Field label="公司 / 服務簡介（可選填）">
                   <textarea
                     value={profileForm.description}
                     onChange={(e) => setProfileForm((v) => ({ ...v, description: e.target.value }))}
                     className="min-h-28 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
                   />
                 </Field>
-                <Field label="產品類別（逗號分隔）">
+                <div className="space-y-4 rounded-xl border border-neutral-200 bg-neutral-50/60 p-4">
+                  <div className="text-sm font-medium text-neutral-800">收款帳戶</div>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <Field label="帳戶名稱">
+                      <Input
+                        value={profileForm.bank_account_name}
+                        onChange={(e) => setProfileForm((v) => ({ ...v, bank_account_name: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="帳戶號碼">
+                      <Input
+                        value={profileForm.bank_account_number}
+                        onChange={(e) => setProfileForm((v) => ({ ...v, bank_account_number: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="SWIFT CODE">
+                      <Input
+                        value={profileForm.bank_swift_code}
+                        onChange={(e) => setProfileForm((v) => ({ ...v, bank_swift_code: e.target.value }))}
+                      />
+                    </Field>
+                  </div>
+                  <Field label="存摺照片（需顯示帳戶完整資訊）">
+                    <div className="space-y-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) void uploadPassbook(file);
+                        }}
+                      />
+                      {uploadingPassbook ? <div className="text-xs text-neutral-500">上傳中...</div> : null}
+                      {profileForm.bank_passbook_image ? (
+                        <a
+                          href={profileForm.bank_passbook_image}
+                          target="_blank"
+                          className="text-xs font-medium text-neutral-600 underline underline-offset-4"
+                        >
+                          檢視已上傳的存摺照片
+                        </a>
+                      ) : null}
+                    </div>
+                  </Field>
+                </div>
+                <Field label="產品類別（可選填，逗號分隔）">
                   <Input
                     value={profileForm.product_categories}
                     onChange={(e) =>
@@ -2052,30 +2379,18 @@ export default function TradePage() {
                     }
                   />
                 </Field>
-                <Field label="目標市場（逗號分隔）">
-                  <Input
-                    value={profileForm.target_markets}
-                    onChange={(e) =>
-                      setProfileForm((v) => ({ ...v, target_markets: e.target.value }))
-                    }
+                <label className="flex items-start gap-2 rounded-xl border border-neutral-200 px-4 py-3 text-sm text-neutral-700">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={profileForm.contract_agreed}
+                    onChange={(e) => setProfileForm((v) => ({ ...v, contract_agreed: e.target.checked }))}
+                    required
                   />
-                </Field>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field label="預算區間">
-                    <Input
-                      value={profileForm.budget_range}
-                      onChange={(e) =>
-                        setProfileForm((v) => ({ ...v, budget_range: e.target.value }))
-                      }
-                    />
-                  </Field>
-                  <Field label="產能 / 交期能力">
-                    <Input
-                      value={profileForm.capacity}
-                      onChange={(e) => setProfileForm((v) => ({ ...v, capacity: e.target.value }))}
-                    />
-                  </Field>
-                </div>
+                  <span>
+                    我已閱讀並同意平台合約條款，且了解禁止上架違禁品（例如：槍械、非法藥物等）。（必填）
+                  </span>
+                </label>
                 <Button type="submit" className="min-w-32" disabled={savingProfile}>
                   {savingProfile ? "儲存中..." : "儲存檔案"}
                 </Button>
@@ -2517,6 +2832,23 @@ function readSpec(specs: Record<string, unknown> | null | undefined, key: string
 
 function readSpecBool(specs: Record<string, unknown> | null | undefined, key: string) {
   return specs?.[key] === true;
+}
+
+function readSpecMatrix(specs: Record<string, unknown> | null | undefined, priceMin: number | null) {
+  const raw = specs?.spec_matrix;
+  const matrix = SPEC_MATRIX_COLUMNS.map((_, index) => {
+    const entry = Array.isArray(raw) ? (raw[index] as Record<string, unknown> | undefined) : undefined;
+    return {
+      price_usd: typeof entry?.price_usd === "string" ? entry.price_usd : "",
+      dimensions_cm: typeof entry?.dimensions_cm === "string" ? entry.dimensions_cm : "",
+      net_weight_kg: typeof entry?.net_weight_kg === "string" ? entry.net_weight_kg : "",
+      gross_weight_kg: typeof entry?.gross_weight_kg === "string" ? entry.gross_weight_kg : "",
+    };
+  });
+  if (!matrix[0].price_usd && priceMin != null) {
+    matrix[0].price_usd = String(priceMin);
+  }
+  return matrix;
 }
 
 function readSpecialVariants(specs: Record<string, unknown> | null | undefined) {
