@@ -5,6 +5,7 @@ import { flexionCompleteJSON, pickModel } from "@/lib/flexion";
 import { slugifySiteName, type SitePageSection, type SiteSchema } from "@/lib/site-builder";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { shapeMessage } from "@/lib/conversation/api";
+import { appendMessage } from "@/lib/conversation/active-path";
 import {
   getWebsiteCollectionScript,
   WEBSITE_STYLE_OPTIONS,
@@ -534,22 +535,18 @@ async function createAssistantMessage(params: {
   model?: string;
   parentMessageId?: string | null;
 }) {
-  const message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversationId,
+  const message = await appendMessage(
+    params.conversationId,
+    {
       role: MessageRole.assistant,
       message_type: MessageType.ai,
       content: { type: "text", text: params.text },
       metadata: params.metadata,
       credits_used: BigInt(0),
       model: params.model || "website-builder-router",
-      parent_message_id: params.parentMessageId ?? null,
     },
-  });
-  await prisma.conversation.update({
-    where: { id: params.conversationId },
-    data: { active_leaf_message_id: message.id },
-  });
+    { parentMessageId: params.parentMessageId ?? undefined },
+  );
   publishConversationEvent(params.conversationId, "message.completed", shapeMessage(message));
   return message;
 }
@@ -2260,10 +2257,8 @@ async function createEditedWebsiteMessage(params: {
     ],
   };
   const messageData = {
-      conversation_id: params.conversation.id,
       role: MessageRole.assistant,
       message_type: MessageType.generation_result,
-      parent_message_id: params.parentMessageId ?? null,
       content: {
         type: "website_html",
         status: "completed",
@@ -2354,12 +2349,19 @@ async function createEditedWebsiteMessage(params: {
       model: "website-builder-editor",
   };
   const message = existingMessage
-    ? await prisma.message.update({ where: { id: existingMessage.id }, data: messageData })
-    : await prisma.message.create({ data: messageData });
-  await prisma.conversation.update({
-    where: { id: params.conversation.id },
-    data: { active_leaf_message_id: message.id },
-  });
+    ? await prisma.message.update({
+        where: { id: existingMessage.id },
+        data: { ...messageData, parent_message_id: params.parentMessageId ?? null },
+      })
+    : await appendMessage(params.conversation.id, messageData, {
+        parentMessageId: params.parentMessageId ?? undefined,
+      });
+  if (existingMessage) {
+    await prisma.conversation.update({
+      where: { id: params.conversation.id },
+      data: { active_leaf_message_id: message.id },
+    });
+  }
   publishConversationEvent(params.conversation.id, "generation.result.completed", shapeMessage(message));
   return message;
 }
@@ -2435,12 +2437,11 @@ async function createGeneratedWebsite(params: {
     },
   });
 
-  const message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversation.id,
+  const message = await appendMessage(
+    params.conversation.id,
+    {
       role: MessageRole.assistant,
       message_type: MessageType.generation_result,
-      parent_message_id: params.parentMessageId ?? null,
       content: {
         type: "website_html",
         status: "completed",
@@ -2555,11 +2556,8 @@ async function createGeneratedWebsite(params: {
       credits_used: BigInt(0),
       model: "website-builder",
     },
-  });
-  await prisma.conversation.update({
-    where: { id: params.conversation.id },
-    data: { active_leaf_message_id: message.id },
-  });
+    { parentMessageId: params.parentMessageId ?? undefined },
+  );
   publishConversationEvent(params.conversation.id, "generation.result.completed", shapeMessage(message));
   return message;
 }

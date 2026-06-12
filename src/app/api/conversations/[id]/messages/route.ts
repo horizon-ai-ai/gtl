@@ -21,8 +21,8 @@ import {
   toInputJson,
 } from "@/lib/conversation/api";
 import {
+  appendMessage,
   loadActivePathMessages,
-  resolveAppendParentMessageId,
   resolveSiblingParentMessageId,
 } from "@/lib/conversation/active-path";
 import {
@@ -1129,9 +1129,9 @@ async function legacyCreateGenerationResult(params: {
       ? await resolveSiblingParentMessageId(params.conversationId, sourceMessageForParent.id)
       : sourceMessageForParent?.id ?? null;
 
-  let message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversationId,
+  let message = await appendMessage(
+    params.conversationId,
+    {
       role: MessageRole.assistant,
       message_type: MessageType.generation_result,
       design_task_id: params.task.id,
@@ -1141,9 +1141,9 @@ async function legacyCreateGenerationResult(params: {
       tokens_output: 0,
       credits_used: BigInt(0),
       model: params.model,
-      parent_message_id: generationParentMessageId,
     },
-  });
+    { parentMessageId: generationParentMessageId ?? undefined },
+  );
   publishConversationEvent(params.conversationId, "message.created", shapeMessage(message));
 
   const publishStreamingResult = async (force = false) => {
@@ -1627,9 +1627,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           ? (original.metadata as Record<string, unknown>)
           : {};
       const siblingParentMessageId = await resolveSiblingParentMessageId(params.id, original.id);
-      editedUserMessage = await prisma.message.create({
-        data: {
-          conversation_id: params.id,
+      editedUserMessage = await appendMessage(
+        params.id,
+        {
           role: MessageRole.user,
           message_type: MessageType.ai,
           content: { type: "text", text },
@@ -1643,13 +1643,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             uploadedImageUrls: parsedBody.uploadedImageUrls,
           } as Prisma.InputJsonValue,
           design_task_id: original.design_task_id,
-          parent_message_id: siblingParentMessageId,
         },
-      });
-      await prisma.conversation.update({
-        where: { id: params.id },
-        data: { active_leaf_message_id: editedUserMessage.id },
-      });
+        // Explicit (possibly null) parent: the edit is a SIBLING of the
+        // original, not an append to the current leaf.
+        { parentMessageId: siblingParentMessageId },
+      );
       publishConversationEvent(params.id, "message.created", shapeMessage(editedUserMessage));
     }
 
@@ -1703,30 +1701,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       providerConfig: earlyResolvedModel.providerConfig,
     });
 
-    const appendParentMessageId = editedUserMessage
-      ? null
-      : await resolveAppendParentMessageId(params.id, conversation.active_leaf_message_id);
-    let userMessage = editedUserMessage ?? await prisma.message.create({
-      data: {
-        conversation_id: params.id,
-        role: MessageRole.user,
-        message_type: MessageType.ai,
-        content: { type: "text", text },
-        metadata: {
-          ...requestMetadata,
-          source: "conversations.messages",
-          activeDesignTaskId: activeTask?.id ?? null,
-          uploadedImageUrls: parsedBody.uploadedImageUrls,
-        } as Prisma.InputJsonValue,
-        design_task_id: activeTask?.id,
-        parent_message_id: appendParentMessageId,
-      },
+    let userMessage = editedUserMessage ?? await appendMessage(params.id, {
+      role: MessageRole.user,
+      message_type: MessageType.ai,
+      content: { type: "text", text },
+      metadata: {
+        ...requestMetadata,
+        source: "conversations.messages",
+        activeDesignTaskId: activeTask?.id ?? null,
+        uploadedImageUrls: parsedBody.uploadedImageUrls,
+      } as Prisma.InputJsonValue,
+      design_task_id: activeTask?.id,
     });
     if (!editedUserMessage) {
-      await prisma.conversation.update({
-        where: { id: params.id },
-        data: { active_leaf_message_id: userMessage.id },
-      });
       publishConversationEvent(params.id, "message.created", shapeMessage(userMessage));
     }
     const inferredTaskTypeForRouting = parseDesignTaskType(earlyIntent?.taskType);
@@ -1737,9 +1724,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         isWebsiteTaskType(inferredTaskTypeForRouting));
 
     if (!shouldHandleWebsiteBuilder && !isExplicitGenerateQuickReply) {
-      streamingAssistantMessage = await prisma.message.create({
-        data: {
-          conversation_id: params.id,
+      streamingAssistantMessage = await appendMessage(
+        params.id,
+        {
           role: MessageRole.assistant,
           message_type: MessageType.ai,
           content: { type: "text", text: "" },
@@ -1749,13 +1736,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             stageDescription: "正在判斷這輪要回答、整理還是產生成果",
           }) as Prisma.InputJsonValue,
           design_task_id: activeTask?.id,
-          parent_message_id: userMessage.id,
         },
-      });
-      await prisma.conversation.update({
-        where: { id: params.id },
-        data: { active_leaf_message_id: streamingAssistantMessage.id },
-      });
+        { parentMessageId: userMessage.id },
+      );
       publishConversationEvent(params.id, "message.created", shapeMessage(streamingAssistantMessage));
     }
 
@@ -1951,9 +1934,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const createStreamingPlaceholder = async (stageLabel = "整理上下文", stageDescription = "正在對齊目前任務與最近對話") => {
       if (streamingAssistantMessage) return streamingAssistantMessage;
-      streamingAssistantMessage = await prisma.message.create({
-        data: {
-          conversation_id: params.id,
+      streamingAssistantMessage = await appendMessage(
+        params.id,
+        {
           role: MessageRole.assistant,
           message_type: MessageType.ai,
           content: { type: "text", text: "" },
@@ -1964,13 +1947,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           }) as Prisma.InputJsonValue,
           design_task_id: task?.id,
           model,
-          parent_message_id: userMessage.id,
         },
-      });
-      await prisma.conversation.update({
-        where: { id: params.id },
-        data: { active_leaf_message_id: streamingAssistantMessage.id },
-      });
+        { parentMessageId: userMessage.id },
+      );
       publishConversationEvent(params.id, "message.created", shapeMessage(streamingAssistantMessage));
       return streamingAssistantMessage;
     };
@@ -2286,15 +2265,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           where: { id: activeStreamingAssistant.id },
           data: assistantPayload,
         })
-      : await prisma.message.create({
-          data: {
-            conversation_id: params.id,
+      : await appendMessage(
+          params.id,
+          {
             role: MessageRole.assistant,
             message_type: MessageType.ai,
             ...assistantPayload,
-            parent_message_id: userMessage.id,
           },
-        });
+          { parentMessageId: userMessage.id },
+        );
     assistantFinalized = true;
 
     await prisma.conversation.update({

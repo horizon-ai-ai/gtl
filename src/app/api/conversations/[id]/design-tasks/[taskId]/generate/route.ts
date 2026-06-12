@@ -10,7 +10,7 @@ import { flexionStream, pickModel, rawToCredits, type FlexionRequest } from "@/l
 import { generateSiteSchema, slugifySiteName } from "@/lib/site-builder";
 import { dispatchImageGeneration, imageCreditCost } from "@/lib/conversation/generation-dispatcher";
 import { dispatchTextGeneration } from "@/lib/conversation/dispatch/text-generation";
-import { resolveSiblingParentMessageId } from "@/lib/conversation/active-path";
+import { appendMessage, resolveSiblingParentMessageId } from "@/lib/conversation/active-path";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import {
   getOwnedConversation,
@@ -349,7 +349,30 @@ export async function POST(
         }
       }
 
-      const [updatedTask, message] = await prisma.$transaction([
+      const message = await appendMessage(
+        params.id,
+        {
+          role: MessageRole.assistant,
+          message_type: MessageType.generation_result,
+          design_task_id: task.id,
+          content: {
+            type: "site_schema",
+            status: "completed",
+            taskId: task.id,
+            taskType: task.task_type,
+            executionStrategy,
+            site,
+            schema: siteSchema,
+          },
+          metadata: {
+            source: "design-task.generate",
+            domain: "web",
+          },
+          model: "site-builder",
+        },
+        { parentMessageId: generationParentMessageId ?? undefined },
+      );
+      const [updatedTask] = await prisma.$transaction([
         prisma.designTask.update({
           where: { id: task.id },
           data: {
@@ -359,38 +382,11 @@ export async function POST(
             last_activity_at: new Date(),
           },
         }),
-        prisma.message.create({
-          data: {
-            conversation_id: params.id,
-            role: MessageRole.assistant,
-            message_type: MessageType.generation_result,
-            design_task_id: task.id,
-            content: {
-              type: "site_schema",
-              status: "completed",
-              taskId: task.id,
-              taskType: task.task_type,
-              executionStrategy,
-              site,
-              schema: siteSchema,
-            },
-            metadata: {
-              source: "design-task.generate",
-              domain: "web",
-            },
-            model: "site-builder",
-            parent_message_id: generationParentMessageId,
-          },
-        }),
         prisma.conversation.update({
           where: { id: params.id },
           data: { last_message_at: new Date(), active_design_task_id: task.id },
         }),
       ]);
-      await prisma.conversation.update({
-        where: { id: params.id },
-        data: { active_leaf_message_id: message.id },
-      });
 
       return ok({
         task: shapeDesignTask(updatedTask),
@@ -535,9 +531,9 @@ export async function POST(
       pendingOutputs: 1,
     };
 
-    let message = await prisma.message.create({
-      data: {
-        conversation_id: params.id,
+    let message = await appendMessage(
+      params.id,
+      {
         role: MessageRole.assistant,
         message_type: MessageType.generation_result,
         design_task_id: task.id,
@@ -547,13 +543,9 @@ export async function POST(
         tokens_output: 0,
         credits_used: BigInt(0),
         model,
-        parent_message_id: lineage.parentMessageId,
       },
-    });
-    await prisma.conversation.update({
-      where: { id: params.id },
-      data: { active_leaf_message_id: message.id },
-    });
+      { parentMessageId: lineage.parentMessageId ?? undefined },
+    );
     publishConversationEvent(params.id, "message.created", shapeMessage(message));
 
     const publishStreamingResult = async (force = false) => {

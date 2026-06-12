@@ -14,8 +14,8 @@ type MessageRow = {
 const messages: MessageRow[] = [];
 let messageSeq = 0;
 
-jest.mock("@/lib/db", () => ({
-  prisma: {
+jest.mock("@/lib/db", () => {
+  const prisma = {
     conversation: {
       findFirst: jest.fn(async () => ({
         id: "conv_1",
@@ -26,7 +26,7 @@ jest.mock("@/lib/db", () => ({
         project_memory: null,
         active_design_task_id: null,
       })),
-      findUnique: jest.fn(async () => ({ active_design_task_id: null })),
+      findUnique: jest.fn(async () => ({ active_design_task_id: null, active_leaf_message_id: null })),
       update: jest.fn(async () => ({})),
     },
     designTask: {
@@ -51,6 +51,17 @@ jest.mock("@/lib/db", () => ({
         return { ...row };
       }),
       findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async (args?: { where?: Record<string, unknown>; orderBy?: Record<string, string> }) => {
+        const where = args?.where ?? {};
+        let rows = messages.filter(
+          (m) =>
+            (!where.id || m.id === where.id) &&
+            (!where.conversation_id || m.conversation_id === where.conversation_id) &&
+            (!where.role || m.role === where.role),
+        );
+        if (args?.orderBy?.created_at === "desc") rows = [...rows].reverse();
+        return rows[0] ? { ...rows[0] } : null;
+      }),
       update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = messages.find((m) => m.id === where.id);
         if (!row) throw new Error("not found");
@@ -72,8 +83,15 @@ jest.mock("@/lib/db", () => ({
       create: jest.fn(),
       update: jest.fn(async () => ({})),
     },
-  },
-}));
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (arg: unknown) =>
+    typeof arg === "function"
+      ? (arg as (tx: typeof prisma) => Promise<unknown>)(prisma)
+      : Promise.all(arg as Array<Promise<unknown>>),
+  );
+  return { prisma };
+});
 
 const authMock = jest.fn();
 jest.mock("@/lib/auth", () => ({

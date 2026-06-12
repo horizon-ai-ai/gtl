@@ -21,6 +21,7 @@ import {
   toInputJson,
 } from "@/lib/conversation/api";
 import { getSchema } from "@/lib/conversation/schema-registry";
+import { appendMessage } from "@/lib/conversation/active-path";
 import { marketingIntelligence, type MarketingIntelligencePack } from "@/lib/conversation/marketing-intelligence";
 
 const SYSTEM_PROMPT =
@@ -190,19 +191,16 @@ export async function POST(req: NextRequest) {
     return fail("VALIDATION_ERROR", (err as Error).message);
   }
 
-  await prisma.message.create({
-    data: {
-      conversation_id: conversationId,
-      role: MessageRole.user,
-      message_type: MessageType.ai,
-      content: { type: "text", text: body.content },
-      metadata: {
-        ...(body.metadata ?? {}),
-        source: "chat.messages",
-        activeDesignTaskId: activeTask?.id ?? null,
-      } as Prisma.InputJsonValue,
-      design_task_id: activeTask?.id,
-    },
+  await appendMessage(conversationId, {
+    role: MessageRole.user,
+    message_type: MessageType.ai,
+    content: { type: "text", text: body.content },
+    metadata: {
+      ...(body.metadata ?? {}),
+      source: "chat.messages",
+      activeDesignTaskId: activeTask?.id ?? null,
+    } as Prisma.InputJsonValue,
+    design_task_id: activeTask?.id,
   });
 
   const history = await prisma.message.findMany({
@@ -307,9 +305,7 @@ export async function POST(req: NextRequest) {
       const credits = rawToCredits(model, usage, resolvedModel.creditMultiplier);
       const recommendedActions = detectRecommendedActions(assembled);
       const suggestedItems = extractSuggestedItems(assembled);
-      await prisma.message.create({
-        data: {
-          conversation_id: conversationId!,
+      await appendMessage(conversationId!, {
           role: MessageRole.assistant,
           message_type: MessageType.ai,
           content: { type: "text", text: assembled },
@@ -334,7 +330,6 @@ export async function POST(req: NextRequest) {
           tokens_output: usage.output_tokens,
           credits_used: credits,
           model,
-        },
       });
       await prisma.conversation.update({
         where: { id: conversationId! },

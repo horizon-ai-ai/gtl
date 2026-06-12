@@ -1,4 +1,4 @@
-import type { Message } from "@prisma/client";
+import type { Message, Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/db";
 
@@ -187,17 +187,88 @@ export async function resolveDeepestLeaf(
   return cursorId;
 }
 
-export async function resolveAppendParentMessageId(
+export type AppendMessageData = Omit<
+  Prisma.MessageUncheckedCreateInput,
+  "conversation_id" | "parent_message_id"
+>;
+
+export type AppendMessageOptions = {
+  /**
+   * Explicit parent for sibling-creating flows (edits, regenerations).
+   * Omit (or pass undefined) to default to the conversation's current active
+   * leaf — appended messages must never detach from the tree when the
+   * conversation already has messages. Passing null explicitly creates a
+   * root message (sibling of a root, e.g. editing the first message).
+   */
+  parentMessageId?: string | null;
+};
+
+/**
+ * Single append primitive for conversation messages. Owns the two-part
+ * branch invariant: (a) the new message's parent defaults to the
+ * conversation's current active leaf, and (b) the message create plus the
+ * active_leaf_message_id bump happen inside ONE transaction, with the leaf
+ * re-read inside the transaction so concurrent sends serialize. A transaction
+ * failure leaves both the message and the leaf unchanged.
+ */
+export async function appendMessage(
   conversationId: string,
-  activeLeafMessageId?: string | null,
-) {
-  if (activeLeafMessageId) return activeLeafMessageId;
-  const latest = await prisma.message.findFirst({
-    where: { conversation_id: conversationId },
-    select: { id: true },
-    orderBy: { created_at: "desc" },
+  data: AppendMessageData,
+  options?: AppendMessageOptions,
+): Promise<Message> {
+  return prisma.$transaction(async (tx) => {
+    // undefined → default append; null → explicit root; string → explicit parent.
+    const explicitParent = options?.parentMessageId;
+    let parentMessageId: string | null = explicitParent ?? null;
+    let useDefault = explicitParent === undefined;
+    if (parentMessageId) {
+      // Guard against dangling explicit parents (e.g. a placeholder deleted
+      // by a concurrent path): fall back to the default-append rules below.
+      const parent = await tx.message.findFirst({
+        where: { id: parentMessageId, conversation_id: conversationId },
+        select: { id: true },
+      });
+      parentMessageId = parent?.id ?? null;
+      if (!parentMessageId) useDefault = true;
+    }
+    if (useDefault && !parentMessageId) {
+      const conversation = await tx.conversation.findUnique({
+        where: { id: conversationId },
+        select: { active_leaf_message_id: true },
+      });
+      const leafId = conversation?.active_leaf_message_id ?? null;
+      if (leafId) {
+        const leaf = await tx.message.findFirst({
+          where: { id: leafId, conversation_id: conversationId },
+          select: { id: true },
+        });
+        parentMessageId = leaf?.id ?? null;
+      }
+      if (!parentMessageId) {
+        // Legacy conversation without a leaf pointer (or a dangling leaf):
+        // chain onto the latest message by created_at.
+        const latest = await tx.message.findFirst({
+          where: { conversation_id: conversationId },
+          select: { id: true },
+          orderBy: { created_at: "desc" },
+        });
+        parentMessageId = latest?.id ?? null;
+      }
+    }
+
+    const message = await tx.message.create({
+      data: {
+        ...data,
+        conversation_id: conversationId,
+        parent_message_id: parentMessageId,
+      } as Prisma.MessageUncheckedCreateInput,
+    });
+    await tx.conversation.update({
+      where: { id: conversationId },
+      data: { active_leaf_message_id: message.id },
+    });
+    return message;
   });
-  return latest?.id ?? null;
 }
 
 export async function resolveSiblingParentMessageId(

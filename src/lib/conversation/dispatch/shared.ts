@@ -3,7 +3,7 @@ import { MessageRole, MessageType, type Message, type Prisma } from "@prisma/cli
 
 import { prisma } from "@/lib/db";
 import { shapeMessage } from "@/lib/conversation/api";
-import { resolveSiblingParentMessageId } from "@/lib/conversation/active-path";
+import { appendMessage, resolveSiblingParentMessageId } from "@/lib/conversation/active-path";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 
 export type GenerationLineage = {
@@ -184,23 +184,21 @@ export async function createGenerationPlaceholder(params: CreateGenerationPlaceh
   } satisfies Record<string, unknown>;
 
   try {
-    const message = await prisma.message.create({
-      data: {
+    const message = await appendMessage(
+      params.conversationId,
+      {
         id: markerId,
-        conversation_id: params.conversationId,
         role: MessageRole.assistant,
         message_type: MessageType.generation_result,
         design_task_id: params.taskId,
         content: params.initialContent,
         metadata: metadata as Prisma.InputJsonValue,
         model: params.model,
-        parent_message_id: params.lineage.parentMessageId,
       },
-    });
-    await prisma.conversation.update({
-      where: { id: params.conversationId },
-      data: { active_leaf_message_id: message.id },
-    });
+      // Null lineage parent (no source message) falls back to the default
+      // append rules so the placeholder always joins the active path.
+      { parentMessageId: params.lineage.parentMessageId ?? undefined },
+    );
     publishConversationEvent(params.conversationId, "message.created", shapeMessage(message));
     publishConversationEvent(params.conversationId, "generation.result.updated", {
       messageId: message.id,
