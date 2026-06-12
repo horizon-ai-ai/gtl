@@ -57,15 +57,16 @@ function repairedParentMessageId(message: Message, allMessages: Message[]) {
 
 function siblingsFor(
   message: Message,
-  byId: Map<string, Message>,
   childrenByParent: Map<string | null, Message[]>,
-  rootSiblings: Message[],
 ) {
   const parentId = message.parent_message_id;
-  const group =
-    parentId && byId.has(parentId)
-      ? childrenByParent.get(parentId) ?? []
-      : rootSiblings;
+  if (!parentId) {
+    // Root messages are never siblings of each other: a NULL parent is a
+    // singleton group, so legacy flat conversations never grow version
+    // arrows whose click would collapse the conversation.
+    return { count: 1, index: 0, ids: [message.id] };
+  }
+  const group = childrenByParent.get(parentId) ?? [message];
   const sorted = group
     .slice()
     .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
@@ -115,7 +116,6 @@ export async function loadActivePathMessages(
     list.push(m);
     childrenByParent.set(m.parent_message_id, list);
   }
-  const rootSiblings = (childrenByParent.get(null) ?? []).filter((message) => message.role === "user");
 
   const leafId = conversation?.active_leaf_message_id ?? null;
   let chain: Message[];
@@ -137,10 +137,7 @@ export async function loadActivePathMessages(
 
   const metaById = new Map<string, { count: number; index: number; ids: string[] }>();
   for (const message of chain) {
-    metaById.set(
-      message.id,
-      siblingsFor(message, byId, childrenByParent, rootSiblings),
-    );
+    metaById.set(message.id, siblingsFor(message, childrenByParent));
   }
 
   return {
@@ -148,6 +145,19 @@ export async function loadActivePathMessages(
     metaById,
     activeLeafMessageId: leafId,
   };
+}
+
+/**
+ * History for LLM context builders (intent inference, prompt construction):
+ * the conversation's active path capped to the last `limit` messages, so
+ * edited-away branches never leak into prompts.
+ */
+export async function loadActivePathHistory(
+  conversationId: string,
+  limit: number,
+): Promise<Message[]> {
+  const { messages } = await loadActivePathMessages(conversationId);
+  return limit > 0 && messages.length > limit ? messages.slice(-limit) : messages;
 }
 
 /**

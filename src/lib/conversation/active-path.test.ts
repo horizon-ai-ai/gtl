@@ -136,7 +136,7 @@ const prismaMock = {
 
 jest.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
-import { appendMessage } from "./active-path";
+import { appendMessage, loadActivePathHistory, loadActivePathMessages } from "./active-path";
 
 function seedConversation(id: string, activeLeafMessageId: string | null = null) {
   conversationStore.set(id, { id, active_leaf_message_id: activeLeafMessageId });
@@ -243,5 +243,65 @@ describe("appendMessage", () => {
 
     expect(messageStore.size).toBe(1);
     expect(conversationStore.get("c1")?.active_leaf_message_id).toBe("m1");
+  });
+});
+
+describe("sibling computation", () => {
+  it("treats NULL-parent messages as singleton sibling groups", async () => {
+    seedMessage("m1", "c1");
+    seedMessage("m2", "c1");
+    seedMessage("m3", "c1");
+    seedConversation("c1", null);
+
+    const result = await loadActivePathMessages("c1");
+
+    expect(result.messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    for (const message of result.messages) {
+      expect(result.metaById.get(message.id)).toEqual({
+        count: 1,
+        index: 0,
+        ids: [message.id],
+      });
+    }
+  });
+
+  it("still paginates true siblings sharing a non-NULL parent", async () => {
+    seedMessage("m1", "c1");
+    seedMessage("m2a", "c1", "m1");
+    seedMessage("m2b", "c1", "m1");
+    seedConversation("c1", "m2b");
+
+    const result = await loadActivePathMessages("c1");
+
+    expect(result.metaById.get("m2b")).toEqual({
+      count: 2,
+      index: 1,
+      ids: ["m2a", "m2b"],
+    });
+  });
+});
+
+describe("loadActivePathHistory", () => {
+  it("excludes the edited-away branch from the returned history", async () => {
+    seedMessage("m1", "c1");
+    seedMessage("m2", "c1", "m1"); // original user message
+    seedMessage("m3", "c1", "m2"); // its abandoned reply
+    seedMessage("m2-edit", "c1", "m1"); // edited sibling, now active
+    seedConversation("c1", "m2-edit");
+
+    const history = await loadActivePathHistory("c1", 50);
+
+    expect(history.map((m) => m.id)).toEqual(["m1", "m2-edit"]);
+  });
+
+  it("caps the history to the last `limit` chain messages", async () => {
+    seedMessage("m1", "c1");
+    seedMessage("m2", "c1", "m1");
+    seedMessage("m3", "c1", "m2");
+    seedConversation("c1", "m3");
+
+    const history = await loadActivePathHistory("c1", 2);
+
+    expect(history.map((m) => m.id)).toEqual(["m2", "m3"]);
   });
 });

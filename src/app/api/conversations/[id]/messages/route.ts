@@ -22,6 +22,7 @@ import {
 } from "@/lib/conversation/api";
 import {
   appendMessage,
+  loadActivePathHistory,
   loadActivePathMessages,
   resolveSiblingParentMessageId,
 } from "@/lib/conversation/active-path";
@@ -1658,11 +1659,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       preQuickReplyAction === "proceed_generate";
     const activeTask = await findConversationActiveTask(params.id, user.id);
     const websiteBuilderCandidate = isWebsiteBuilderRequest({ text, body, conversation, activeTask });
-    const preTaskHistory = await prisma.message.findMany({
-      where: { conversation_id: params.id },
-      orderBy: { created_at: "asc" },
-      take: 50,
-    });
+    // One active-path load per request: edited-away branches must not leak
+    // into intent inference or prompt construction. After an edit the leaf
+    // already points at the edited sibling, so this picks up the new branch.
+    const preTaskHistory = await loadActivePathHistory(params.id, 50);
 
     let planCodePromise: Promise<string> | null = null;
     const getPlanCode = () => {
@@ -1845,11 +1845,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
     }
 
-    const history = await prisma.message.findMany({
-      where: { conversation_id: params.id },
-      orderBy: { created_at: "asc" },
-      take: 50,
-    });
+    // Reuse the request's single active-path load. The current user message
+    // was appended after that load, so graft it on (the edited case already
+    // has it on the path via the leaf bump).
+    const history = preTaskHistory.some((m) => m.id === userMessage.id)
+      ? preTaskHistory
+      : [...preTaskHistory, userMessage];
     const requestedModel =
       typeof body.selectedModel === "string" && body.selectedModel.trim()
         ? body.selectedModel.trim()
