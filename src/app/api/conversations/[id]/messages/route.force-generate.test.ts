@@ -70,6 +70,9 @@ jest.mock("@/lib/db", () => {
       })),
       findMany: jest.fn(async () => []),
       findFirst: jest.fn(async () => null),
+      // updateGenerationMessage re-reads the row to preserve a concurrently
+      // written cancelRequested flag; null means "no cancel recorded".
+      findUnique: jest.fn(async () => null),
       update: jest.fn(async () => ({})),
     },
     subscription: { findUnique: jest.fn(async () => ({ plan: { code: "free" } })) },
