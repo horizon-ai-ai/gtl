@@ -50,8 +50,8 @@ export function HeroBreathing({
       className={[
         "relative isolate w-full overflow-hidden",
         "px-6 sm:px-10",
-        "pt-16 pb-24 sm:pt-20 sm:pb-28",
-        "min-h-[420px]",
+        "pt-10 pb-24 sm:pt-12 sm:pb-28",
+        "min-h-[380px]",
         className ?? "",
       ].join(" ")}
     >

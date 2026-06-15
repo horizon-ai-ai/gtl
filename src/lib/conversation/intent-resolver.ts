@@ -1,4 +1,4 @@
-import type { DesignTaskType } from "@prisma/client";
+import { DesignTaskType } from "@prisma/client";
 import { flexionComplete, pickModel, type FlexionRequest } from "@/lib/flexion";
 
 export type UserActionIntent = "ask" | "refine" | "create_new" | "generate" | "cancel" | "chitchat";
@@ -8,7 +8,7 @@ export type UserIntentResult = {
   action: UserActionIntent;
   taskType: DesignTaskType | null;
   assetFamily: AssetFamily;
-  wantsGeneration: boolean;
+  outputCount: number | null;
   confidence: number;
   reasoning: string;
 };
@@ -24,6 +24,7 @@ type InferUserIntentParams = {
 
 const ACTIONS: UserActionIntent[] = ["ask", "refine", "create_new", "generate", "cancel", "chitchat"];
 const ASSET_FAMILIES: Array<Exclude<AssetFamily, null>> = ["visual", "text", "video", "ad_production"];
+const TASK_TYPES = Object.values(DesignTaskType);
 const cache = new Map<string, { expiresAt: number; value: UserIntentResult }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_MAX = 200;
@@ -81,7 +82,14 @@ function normalizeTaskType(value: unknown): DesignTaskType | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  return trimmed as DesignTaskType;
+  return TASK_TYPES.includes(trimmed as DesignTaskType) ? (trimmed as DesignTaskType) : null;
+}
+
+function normalizeOutputCount(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const count = Math.floor(value);
+  if (count < 1) return null;
+  return Math.min(count, 4);
 }
 
 function systemPrompt() {
@@ -95,10 +103,24 @@ function systemPrompt() {
     '  "action": "ask" | "refine" | "create_new" | "generate" | "cancel" | "chitchat",',
     '  "taskType": string | null,',
     '  "assetFamily": "visual" | "text" | "video" | "ad_production" | null,',
-    '  "wantsGeneration": boolean,',
+    '  "outputCount": number | null,',
     '  "confidence": number,',
     '  "reasoning": string',
     "}",
+    "",
+    "Allowed taskType enum values. Return one of these exact values or null:",
+    TASK_TYPES.join(", "),
+    "",
+    "Task mapping examples:",
+    "- logo / logo design / brand mark / wordmark / 商標 / 字標 -> taskType logo, assetFamily visual.",
+    "- 品牌識別 / VI / 視覺識別 -> taskType vi, assetFamily visual.",
+    "- 一頁式網站 / landing page / 活動頁 / 商品介紹頁 -> taskType landing_page, assetFamily visual.",
+    "- 品牌官網 / corporate website -> taskType brand_website, assetFamily visual.",
+    "- 電商網站 / ecommerce / shopping page -> taskType ecommerce_website, assetFamily visual.",
+    "- SEO article / SEO 文章 / 行銷文章 / 部落格文章 / 長文 -> taskType seo_article, assetFamily text.",
+    "- social copy / 社群文案 / IG 貼文 / FB 貼文 / LINE OA 文案 -> taskType social_copy, assetFamily text.",
+    "- 年度行銷策略 / marketing plan -> taskType annual_marketing_strategy, assetFamily text.",
+    "- 廣告投放策略 / ads strategy -> taskType ads_strategy, assetFamily text.",
     "",
     "Definitions:",
     '- "generate" means the user asks the system to produce or show the deliverable now.',
@@ -107,10 +129,19 @@ function systemPrompt() {
     '- "ask" means exploring, asking, or brainstorming.',
     "",
     "Important:",
-    "- If quickReplyAction is proceed_generate, action must be generate and wantsGeneration true.",
+    "- If quickReplyAction is proceed_generate, action must be generate.",
+    "- If quickReplyAction is choose_direction, the user is selecting a direction/angle, not approving final generation yet. Classify as refine or ask unless the message also explicitly asks to generate now.",
+    "- If the user asks to generate/produce/create/show/output a version now, do not keep asking. Classify as generate. Examples: 產生第一版, 生成一版, 直接做第一版, 幫我寫出來, 出三張圖, 生成三張 Logo.",
+    "- If the user asks for multiple visual outputs, set outputCount to the requested count, capped at 4. Otherwise outputCount must be null.",
+    "- For text deliverables, distinguish advice from delivery: if the user asks the assistant to write, produce, generate, draft, output, or create the actual SEO article, social copy set, ad strategy, marketing plan, report, or other text artifact now, classify as generate, assetFamily text.",
+    "- If the user only asks for topic ideas, direction options, research, examples, critique, or what they should prepare next, classify as ask, not generate.",
+    "- Task switching is allowed inside one conversation. If activeTaskType is visual but the user asks for a text deliverable, switch to the text taskType; do not refine the visual task. If the user asks to produce the text now, action generate; if they only start briefing, action create_new.",
+    "- If activeTaskType is text but the user asks for logo/VI/image/design output, switch to the visual taskType; do not refine the text task. If they ask to produce it now, action generate.",
+    "- If an active text task exists and the user supplies missing brief material without asking for the deliverable yet, classify as ask or refine.",
+    "- If an active text task exists and the user asks to adjust a previous version, rewrite a section, keep the current structure, make it longer/shorter, or regenerate another version, classify as refine.",
     "- If there is an active visual task and the user asks to see the actual visual output, classify as generate.",
-    "- If there is an active visual task and the user requests changes to an existing draft, classify as refine and set wantsGeneration true because the system must regenerate the visual.",
-    "- If the user mentions changing brand text, typography, colors, layout, icons, or preserving an existing visual direction for an active visual task, classify as refine and set wantsGeneration true.",
+    "- If there is an active visual task and the user explicitly requests regeneration of an existing draft, classify as refine.",
+    "- If there is an active visual task and the user only supplies missing brief material such as brand name, slogan, product name, reference notes, typography preference, colors, layout preference, or icons, classify as refine unless they clearly ask to generate/regenerate/show the output now.",
     "- If the user is only asking for advice or options, classify as ask unless they clearly ask for output now.",
   ].join("\n");
 }
@@ -154,7 +185,7 @@ export async function inferConversationIntent(params: InferUserIntentParams): Pr
       action,
       taskType: normalizeTaskType(parsed.taskType),
       assetFamily: normalizeAssetFamily(parsed.assetFamily),
-      wantsGeneration: parsed.wantsGeneration === true || action === "generate",
+      outputCount: normalizeOutputCount(parsed.outputCount),
       confidence: clamp01(parsed.confidence),
       reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
     };

@@ -40,8 +40,8 @@ const taskRow: TaskRow = {
   clarification_count: 0,
 };
 
-jest.mock("@/lib/db", () => ({
-  prisma: {
+jest.mock("@/lib/db", () => {
+  const prisma = {
     conversation: {
       findFirst: jest.fn(async () => ({
         id: "conv_1",
@@ -52,7 +52,7 @@ jest.mock("@/lib/db", () => ({
         project_memory: null,
         active_design_task_id: null,
       })),
-      findUnique: jest.fn(async () => ({ active_design_task_id: null })),
+      findUnique: jest.fn(async () => ({ active_design_task_id: null, active_leaf_message_id: null })),
       update: jest.fn(async () => ({})),
     },
     designTask: {
@@ -69,12 +69,22 @@ jest.mock("@/lib/db", () => ({
         created_at: new Date(),
       })),
       findMany: jest.fn(async () => []),
+      findFirst: jest.fn(async () => null),
+      // updateGenerationMessage re-reads the row to preserve a concurrently
+      // written cancelRequested flag; null means "no cancel recorded".
+      findUnique: jest.fn(async () => null),
       update: jest.fn(async () => ({})),
     },
     subscription: { findUnique: jest.fn(async () => ({ plan: { code: "free" } })) },
-    $transaction: jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
-  },
-}));
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (arg: unknown) =>
+    typeof arg === "function"
+      ? (arg as (tx: typeof prisma) => Promise<unknown>)(prisma)
+      : Promise.all(arg as Array<Promise<unknown>>),
+  );
+  return { prisma };
+});
 
 const consumeCreditsMock = jest.fn(async () => {});
 jest.mock("@/lib/credits", () => ({

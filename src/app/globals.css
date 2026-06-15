@@ -341,4 +341,8 @@ body {
   .sidebar-collapsed-toggle:checked ~ .app-sidebar .sidebar-expand-icon {
     display: block;
   }
+
+  .app-sidebar.sidebar-closed .sidebar-expanded-only {
+    display: none;
+  }
 }

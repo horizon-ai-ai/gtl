@@ -236,6 +236,7 @@ export async function* flexionStream(req: FlexionRequest) {
     headers: providerHeaders(req.providerConfig),
     body: JSON.stringify({
       ...req,
+      max_tokens: req.max_tokens ?? 2200,
       providerConfig: undefined,
       stream: true,
       stream_options: { include_usage: true },
@@ -346,7 +347,12 @@ export async function flexionComplete(
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: providerHeaders(req.providerConfig),
-    body: JSON.stringify({ ...req, providerConfig: undefined, stream: false }),
+    body: JSON.stringify({
+      ...req,
+      max_tokens: req.max_tokens ?? 2200,
+      providerConfig: undefined,
+      stream: false,
+    }),
   });
 
   if (!res.ok) throw new Error(`Flexion error: ${res.status} ${await res.text()}`);

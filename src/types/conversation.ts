@@ -107,6 +107,8 @@ export interface Conversation {
   aiModel?: string | null;
   active_design_task_id?: string | null;
   activeDesignTaskId?: string | null;
+  active_leaf_message_id?: string | null;
+  activeLeafMessageId?: string | null;
   last_message_at?: string | null;
   lastMessageAt?: string | null;
   created_at?: string;
@@ -128,6 +130,10 @@ export interface ConversationMessage {
   stepDecision?: ConversationStepDecision | null;
   quickActions?: QuickAction[];
   designTaskId?: string | null;
+  parentMessageId?: string | null;
+  siblingCount?: number;
+  siblingIndex?: number;
+  siblingIds?: string[];
   createdAt?: string;
 }
 

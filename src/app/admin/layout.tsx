@@ -43,23 +43,36 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   ];
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r bg-neutral-900 text-white flex flex-col">
-        <div className="p-4 border-b border-neutral-800 font-semibold">Admin Portal</div>
-        <nav className="flex-1 p-2 space-y-1">
+    <div className="flex h-screen overflow-hidden bg-canvas text-ink-900">
+      <aside className="flex w-72 shrink-0 flex-col border-r border-line1 bg-surface/95 shadow-sm">
+        <div className="border-b border-line1 p-5">
+          <Link href="/admin" className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-md bg-ink-900 text-sm font-semibold text-canvas">
+              G
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-ink-900">GTL Admin</span>
+              <span className="block text-xs text-ink-500">Orders · Support · Trade</span>
+            </span>
+          </Link>
+        </div>
+        <nav className="scrollbar-none flex-1 space-y-1 overflow-auto p-3">
           {nav.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-2 px-3 py-2 rounded-md text-sm hover:bg-neutral-800"
+              className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-ink-700 transition-[background,color,transform] duration-120 ease-smooth hover:-translate-y-px hover:bg-hover hover:text-ink-900"
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="h-4 w-4 text-ink-400" />
               {label}
             </Link>
           ))}
         </nav>
-        <div className="p-3 border-t border-neutral-800 text-xs">
-          <div className="px-3 py-1 truncate">{session.user.email}</div>
+        <div className="border-t border-line1 p-3 text-xs">
+          <div className="mb-2 rounded-md bg-sunken px-3 py-2 text-ink-700">
+            <div className="truncate font-medium">{session.user.email}</div>
+            <div className="mt-0.5 text-ink-400">{session.user.role}</div>
+          </div>
           <form
             action={async () => {
               "use server";
@@ -68,15 +81,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           >
             <button
               type="submit"
-              className="flex items-center gap-2 px-3 py-2 rounded-md w-full hover:bg-neutral-800"
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-ink-500 transition hover:bg-hover hover:text-ink-900"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="h-4 w-4" />
               登出
             </button>
           </form>
         </div>
       </aside>
-      <main className="flex-1 min-w-0 bg-neutral-50">{children}</main>
+      <main className="min-w-0 flex-1 overflow-auto">{children}</main>
     </div>
   );
 }

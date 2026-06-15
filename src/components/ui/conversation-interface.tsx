@@ -2,8 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { ArrowRight, ChevronDown, ChevronRight, ExternalLink, Image as ImageIcon, Search, Upload } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, FileText, Globe2, Image as ImageIcon, Loader2, Pencil, RotateCcw, Search, Square, Upload, X } from "lucide-react";
 import type { ChatMessage, QuickAction } from "@/types/conversation";
+
+export type GenerationArtifactSummary = {
+  kind: "image" | "text" | "web";
+  title: string;
+  subtitle?: string | null;
+  thumbnailUrl?: string | null;
+  versionLabel?: string | null;
+  status?: "queued" | "processing" | "streaming" | "completed" | "failed" | "error" | "idle" | null;
+  isActive?: boolean;
+};
 
 type ConversationInterfaceProps = {
   messages: ChatMessage[];
@@ -11,6 +21,14 @@ type ConversationInterfaceProps = {
   onFillInput?: (value: string, action: QuickAction, message: ChatMessage) => void;
   onUploadFiles?: (files: File[], action: QuickAction, message: ChatMessage) => void;
   onOpenTextArtifact?: (message: ChatMessage) => void;
+  onOpenGenerationResult?: (message: ChatMessage) => void;
+  artifactSummaryForMessage?: (message: ChatMessage) => GenerationArtifactSummary | null;
+  onEditMessage?: (message: ChatMessage, content: string) => boolean | void | Promise<boolean | void>;
+  onCancelMessage?: (message: ChatMessage) => void;
+  onRegenerateMessage?: (message: ChatMessage) => void;
+  versionInfoForMessage?: (message: ChatMessage) => { label: string; canPrevious: boolean; canNext: boolean } | null;
+  onPreviousVersion?: (message: ChatMessage) => void;
+  onNextVersion?: (message: ChatMessage) => void;
   showGeneratedImagesInline?: boolean;
   scrollSignal?: number;
 };
@@ -24,6 +42,12 @@ function isLongTextArtifact(message: ChatMessage, text: string) {
   if (message.role !== "user") return false;
   if (text.length > 900) return true;
   return text.split("\n").length > 14;
+}
+
+function metadataStatus(metadata: ChatMessage["metadata"]) {
+  if (!metadata || typeof metadata !== "object") return null;
+  const status = metadata.status;
+  return typeof status === "string" ? status : null;
 }
 
 function compactTextTitle(text: string) {
@@ -53,6 +77,27 @@ function headingLine(line: string) {
   return { level, content: trimmed.slice(level + 1).trim() };
 }
 
+function unorderedItem(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("- ")) return null;
+  const content = trimmed.slice(2).trim();
+  return content ? { content } : null;
+}
+
+function tableCells(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null;
+  const cells = trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+  return cells.length >= 2 ? cells : null;
+}
+
+function isTableSeparator(cells: string[]) {
+  return cells.every((cell) => {
+    const normalized = cell.split("").filter((char) => char !== ":" && char !== "-" && char !== " ").join("");
+    return normalized.length === 0 && cell.includes("-");
+  });
+}
+
 function InlineMarkdown({ text }: { text: string }) {
   const nodes: React.ReactNode[] = [];
   let cursor = 0;
@@ -80,7 +125,7 @@ function InlineMarkdown({ text }: { text: string }) {
   return <>{nodes}</>;
 }
 
-function MarkdownText({ text }: { text: string }) {
+export function MarkdownText({ text }: { text: string }) {
   const lines = text.split("\n");
   const blocks: React.ReactNode[] = [];
   let index = 0;
@@ -110,6 +155,53 @@ function MarkdownText({ text }: { text: string }) {
       continue;
     }
 
+    if (trimmed === "---" || trimmed === "----") {
+      blocks.push(<hr key={`hr-${index}`} className="my-5 border-line1" />);
+      index += 1;
+      continue;
+    }
+
+    const firstTableCells = tableCells(trimmed);
+    const nextTableCells = index + 1 < lines.length ? tableCells(lines[index + 1]) : null;
+    if (firstTableCells && nextTableCells && isTableSeparator(nextTableCells)) {
+      const headers = firstTableCells;
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length) {
+        const cells = tableCells(lines[index]);
+        if (!cells) break;
+        rows.push(cells);
+        index += 1;
+      }
+      blocks.push(
+        <div key={`table-${index}`} className="my-5 overflow-x-auto rounded-lg border border-line1 bg-surface">
+          <table className="w-full min-w-[520px] text-left text-sm">
+            <thead className="bg-sunken text-ink-900">
+              <tr>
+                {headers.map((header, headerIndex) => (
+                  <th key={`${header}-${headerIndex}`} className="border-b border-line1 px-3 py-2 font-semibold">
+                    <InlineMarkdown text={header} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex} className="border-b border-line1 last:border-b-0">
+                  {headers.map((_, cellIndex) => (
+                    <td key={cellIndex} className="px-3 py-2 align-top text-ink-700">
+                      <InlineMarkdown text={row[cellIndex] ?? ""} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
+
     const ordered = orderedItem(trimmed);
     if (ordered) {
       const items: Array<{ marker: string; content: string }> = [];
@@ -135,11 +227,33 @@ function MarkdownText({ text }: { text: string }) {
       continue;
     }
 
+    const unordered = unorderedItem(trimmed);
+    if (unordered) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const item = unorderedItem(lines[index]);
+        if (!item) break;
+        items.push(item.content);
+        index += 1;
+        while (index < lines.length && !lines[index].trim()) index += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${index}`} className="my-4 list-disc space-y-2 pl-5">
+          {items.map((item) => (
+            <li key={item} className="leading-7">
+              <InlineMarkdown text={item} />
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
     const paragraphLines = [trimmed];
     index += 1;
     while (index < lines.length) {
       const next = lines[index].trim();
-      if (!next || headingLine(next) || orderedItem(next)) break;
+      if (!next || headingLine(next) || orderedItem(next) || unorderedItem(next) || tableCells(next) || next === "---" || next === "----") break;
       paragraphLines.push(next);
       index += 1;
     }
@@ -282,7 +396,7 @@ function TypewriterText({
       return;
     }
 
-    setVisibleCount(0);
+    setVisibleCount((current) => Math.min(current, text.length));
     const step = text.length > 900 ? 8 : text.length > 420 ? 5 : 3;
     const interval = window.setInterval(() => {
       setVisibleCount((current) => {
@@ -960,18 +1074,111 @@ function WebsiteUploadWidget({
   );
 }
 
+function artifactKindMeta(kind: GenerationArtifactSummary["kind"]) {
+  if (kind === "web") return { icon: Globe2, label: "網站" };
+  if (kind === "text") return { icon: FileText, label: "文字" };
+  return { icon: ImageIcon, label: "圖像" };
+}
+
+function GenerationArtifactCard({
+  summary,
+  isRunning,
+  onOpen,
+}: {
+  summary: GenerationArtifactSummary | null;
+  isRunning: boolean;
+  onOpen?: () => void;
+}) {
+  const kind = summary?.kind ?? "image";
+  const { icon: KindIcon, label: kindLabel } = artifactKindMeta(kind);
+  const status = summary?.status ?? (isRunning ? "processing" : "completed");
+  const showSpinner = isRunning || status === "queued" || status === "processing" || status === "streaming";
+  const title = summary?.title || (showSpinner ? "生成中" : "生成成果");
+  const subtitle = summary?.subtitle || null;
+  const thumb = summary?.thumbnailUrl || null;
+  const versionLabel = summary?.versionLabel || null;
+  const active = Boolean(summary?.isActive);
+
+  const cardClass = [
+    "group/artifact w-full max-w-[420px] overflow-hidden rounded-lg border bg-surface text-left shadow-xs transition-[transform,background,border,box-shadow] duration-120 ease-snap",
+    active ? "border-brand-400 ring-1 ring-brand-200" : "border-line1",
+    onOpen ? "cursor-pointer hover:-translate-y-px hover:border-line2 hover:bg-hover hover:shadow-sm" : "cursor-default",
+  ].join(" ");
+
+  const inner = (
+    <div className="flex items-stretch gap-3 p-3">
+      <div className="relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line1 bg-sunken">
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumb} alt={title} className="h-full w-full object-cover" />
+        ) : (
+          <KindIcon className="h-6 w-6 text-ink-400" />
+        )}
+        {showSpinner ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-canvas/70 backdrop-blur-[1px]">
+            <Loader2 className="h-4 w-4 animate-spin text-ink-500" />
+          </div>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink-400">
+            <KindIcon className="h-3 w-3" />
+            <span>{kindLabel}</span>
+            {versionLabel ? (
+              <span className="rounded-pill bg-sunken px-1.5 py-px text-[10px] font-medium text-ink-500">
+                {versionLabel}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 truncate text-sm font-medium text-ink-900">{title}</div>
+          {subtitle ? (
+            <div className="mt-0.5 line-clamp-1 text-xs text-ink-500">{subtitle}</div>
+          ) : null}
+        </div>
+        {onOpen ? (
+          <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-ink-500 transition-colors group-hover/artifact:text-ink-900">
+            <ArrowRight className="h-3 w-3" />
+            <span>{showSpinner ? "在右側查看進度" : "打開內容面板"}</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (!onOpen) {
+    return <div className={cardClass}>{inner}</div>;
+  }
+  return (
+    <button type="button" onClick={onOpen} className={cardClass} aria-label={`打開 ${title}`}>
+      {inner}
+    </button>
+  );
+}
+
 export default function ConversationInterface({
   messages,
   onQuickAction,
   onFillInput,
   onUploadFiles,
   onOpenTextArtifact,
+  onOpenGenerationResult,
+  artifactSummaryForMessage,
+  onEditMessage,
+  onCancelMessage,
+  onRegenerateMessage,
+  versionInfoForMessage,
+  onPreviousVersion,
+  onNextVersion,
   showGeneratedImagesInline = true,
   scrollSignal = 0,
 }: ConversationInterfaceProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [completedStreamingIds, setCompletedStreamingIds] = useState<string[]>([]);
   const [locallyConsumedActionKeys, setLocallyConsumedActionKeys] = useState<string[]>([]);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState("");
+  const [savingEditMessageId, setSavingEditMessageId] = useState<string | null>(null);
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     scrollRef.current?.scrollIntoView({ behavior, block: "end" });
   }, []);
@@ -983,6 +1190,31 @@ export default function ConversationInterface({
   useEffect(() => {
     window.requestAnimationFrame(() => scrollToBottom());
   }, [scrollSignal, scrollToBottom]);
+
+  const startEditingMessage = useCallback((message: ChatMessage) => {
+    setEditingMessageId(message.id);
+    setEditingDraft(messageText(message));
+  }, []);
+
+  const cancelEditingMessage = useCallback(() => {
+    setEditingMessageId(null);
+    setEditingDraft("");
+  }, []);
+
+  const submitEditedMessage = useCallback(async (message: ChatMessage) => {
+    const nextContent = editingDraft.trim();
+    if (!nextContent) {
+      cancelEditingMessage();
+      return;
+    }
+    setSavingEditMessageId(message.id);
+    try {
+      const result = await onEditMessage?.(message, nextContent);
+      if (result !== false) cancelEditingMessage();
+    } finally {
+      setSavingEditMessageId(null);
+    }
+  }, [cancelEditingMessage, editingDraft, onEditMessage]);
 
   const latestAssistantActionMessageId = [...messages]
     .reverse()
@@ -1012,6 +1244,29 @@ export default function ConversationInterface({
             : Array.isArray(message.metadata?.quickActions)
               ? (message.metadata.quickActions as QuickAction[])
               : [];
+        const hasLaterUserMessage = messages.slice(messageIndex + 1).some((item) => item.role === "user");
+        const actionTaskIds = metadataActions
+          .map((action) => action.taskId)
+          .filter((taskId): taskId is string => typeof taskId === "string" && taskId.length > 0);
+        const hasLaterGenerationForAction =
+          actionTaskIds.length > 0 &&
+          messages.slice(messageIndex + 1).some((item) => {
+            if (item.messageType !== "generation_result") return false;
+            const metadataTaskId =
+              item.metadata && typeof item.metadata === "object" && typeof item.metadata.taskId === "string"
+                ? item.metadata.taskId
+                : null;
+            const taskId = item.designTaskId || metadataTaskId;
+            return Boolean(taskId && actionTaskIds.includes(taskId));
+          });
+        const isGenerationResult = message.messageType === "generation_result";
+        const status = metadataStatus(message.metadata);
+        const isRunningAssistant =
+          !isUser &&
+          (Boolean(message.isStreaming && !completedStreamingIds.includes(message.id)) ||
+            status === "queued" ||
+            status === "processing" ||
+            status === "streaming");
         const consumedActionSources = new Set(
           messages
             .filter((item) => item.role === "user")
@@ -1020,22 +1275,23 @@ export default function ConversationInterface({
             .map((item) => item.sourceMessageId)
             .filter((item): item is string => typeof item === "string"),
         );
-        const visibleActions = consumedActionSources.has(message.id)
+        const visibleActions = isGenerationResult || consumedActionSources.has(message.id) || hasLaterUserMessage || hasLaterGenerationForAction
           ? []
           : message.id === latestAssistantActionMessageId
             ? metadataActions.filter((action, index) => !locallyConsumedActionKeys.includes(actionKey(message, action, index)))
             : [];
-        const widget = !isUser && message.id === latestAssistantActionMessageId ? websiteWidget(message) : null;
-        const productOptions = !isUser && message.id === latestAssistantActionMessageId ? websiteProductOptions(message) : [];
-        const text = messageText(message);
-        const isGenerationResult = message.messageType === "generation_result";
+        const widget = !isUser && !isGenerationResult && message.id === latestAssistantActionMessageId ? websiteWidget(message) : null;
+        const productOptions = !isUser && !isGenerationResult && message.id === latestAssistantActionMessageId ? websiteProductOptions(message) : [];
+        const text = isGenerationResult && !showGeneratedImagesInline ? "" : messageText(message);
         const useCompactActions = isGenerationResult && !showGeneratedImagesInline;
+        const versionInfo = !isRunningAssistant ? versionInfoForMessage?.(message) ?? null : null;
         const shouldUseTextArtifact =
           !isGenerationResult &&
           isLongTextArtifact(message, text) &&
           (!message.isStreaming || completedStreamingIds.includes(message.id));
         const hasRenderableContent =
           isUser ||
+          isGenerationResult ||
           text.trim().length > 0 ||
           images.length > 0 ||
           imageAttachments.length > 0 ||
@@ -1049,7 +1305,7 @@ export default function ConversationInterface({
         return (
           <div
             key={message.id}
-            className={`animate-message-in mx-auto flex w-full max-w-3xl ${isUser ? "justify-end" : "justify-start"}`}
+            className={`group animate-message-in mx-auto flex w-full max-w-3xl ${isUser ? "justify-end" : "justify-start"}`}
             style={
               {
                 "--message-x": isUser ? "14px" : "-10px",
@@ -1068,7 +1324,36 @@ export default function ConversationInterface({
               ) : null}
 
               <div className={isUser ? "rounded-lg bg-ink-900 px-5 py-3 text-sm leading-6 text-surface shadow-sm" : "px-1 text-sm leading-7 text-ink-700"}>
-                {shouldUseTextArtifact ? (
+                {isUser && editingMessageId === message.id ? (
+                  <div className="min-w-[280px] max-w-[560px] rounded-lg border border-line2 bg-surface p-2 text-ink-900 shadow-sm">
+                    <textarea
+                      value={editingDraft}
+                      onChange={(event) => setEditingDraft(event.target.value)}
+                      className="min-h-24 w-full resize-y rounded-md border border-line1 bg-sunken px-3 py-2 text-sm leading-6 text-ink-900 outline-none transition focus:border-line2 focus:bg-surface focus:shadow-focus"
+                      autoFocus
+                    />
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={savingEditMessageId === message.id}
+                        onClick={cancelEditingMessage}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line1 bg-surface px-3 text-xs font-medium text-ink-500 transition hover:bg-hover disabled:opacity-50"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingEditMessageId === message.id || !editingDraft.trim()}
+                        onClick={() => void submitEditedMessage(message)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink-900 px-3 text-xs font-medium text-surface transition hover:bg-ink-700 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        套用
+                      </button>
+                    </div>
+                  </div>
+                ) : shouldUseTextArtifact ? (
                   <div className={isUser ? "min-w-[240px] max-w-[420px]" : "w-full max-w-[520px]"}>
                     <div className={isUser ? "text-sm font-medium text-surface" : "text-sm font-medium text-ink-900"}>
                       {isUser ? "已附上長內容" : "已整理成文字成果"}
@@ -1089,6 +1374,12 @@ export default function ConversationInterface({
                       查看內容
                     </button>
                   </div>
+                ) : isGenerationResult && !showGeneratedImagesInline ? (
+                  <GenerationArtifactCard
+                    summary={artifactSummaryForMessage?.(message) ?? null}
+                    isRunning={isRunningAssistant}
+                    onOpen={onOpenGenerationResult ? () => onOpenGenerationResult(message) : undefined}
+                  />
                 ) : isUser ? (
                   <div className="whitespace-pre-wrap">{messageText(message)}</div>
                 ) : (
@@ -1106,6 +1397,70 @@ export default function ConversationInterface({
                   />
                 )}
               </div>
+
+              {isUser && editingMessageId !== message.id && onEditMessage ? (
+                <div className="mt-2 flex w-full justify-end px-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => startEditingMessage(message)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-pill border border-line1 bg-surface px-2.5 text-xs font-medium text-ink-500 shadow-xs transition hover:border-line2 hover:bg-hover hover:text-ink-900"
+                    aria-label="編輯訊息"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    編輯
+                  </button>
+                </div>
+              ) : null}
+
+              {(versionInfo || (!isUser && isGenerationResult && (onCancelMessage || onRegenerateMessage))) ? (
+                <div className="mt-2 flex items-center gap-2 px-1 text-xs text-ink-400">
+                  {!isUser && isGenerationResult && isRunningAssistant && onCancelMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => onCancelMessage(message)}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-pill border border-line1 bg-surface px-2.5 font-medium text-ink-500 shadow-xs transition-[transform,background,border,color] duration-120 ease-snap hover:-translate-y-px hover:border-line2 hover:bg-hover hover:text-ink-900"
+                      aria-label="停止回覆"
+                    >
+                      <Square className="h-3 w-3 fill-current" />
+                      停止
+                    </button>
+                  ) : null}
+                  {!isUser && isGenerationResult && !isRunningAssistant && onRegenerateMessage ? (
+                    <button
+                      type="button"
+                      onClick={() => onRegenerateMessage(message)}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-pill border border-line1 bg-surface px-2.5 font-medium text-ink-500 shadow-xs transition-[transform,background,border,color] duration-120 ease-snap hover:-translate-y-px hover:border-line2 hover:bg-hover hover:text-ink-900"
+                      aria-label="重生回覆"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      重生
+                    </button>
+                  ) : null}
+                  {versionInfo ? (
+                    <span className="inline-flex items-center gap-1 rounded-pill border border-line1 bg-surface p-0.5 shadow-xs">
+                      <button
+                        type="button"
+                        disabled={!versionInfo.canPrevious}
+                        onClick={() => onPreviousVersion?.(message)}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-ink-400 transition hover:bg-hover hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
+                        aria-label="上一版"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="px-1 text-[11px] font-medium text-ink-500">{versionInfo.label}</span>
+                      <button
+                        type="button"
+                        disabled={!versionInfo.canNext}
+                        onClick={() => onNextVersion?.(message)}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-ink-400 transition hover:bg-hover hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
+                        aria-label="下一版"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
 
               {imageAttachments.length > 0 ? (
                 <div className={`mt-3 grid gap-2 ${imageAttachments.length > 1 ? "grid-cols-2" : "grid-cols-1"} max-w-[420px]`}>

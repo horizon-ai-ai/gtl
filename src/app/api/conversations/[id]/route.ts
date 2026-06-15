@@ -5,8 +5,9 @@ import {
   getOwnedConversation,
   requireSessionUser,
   shapeDesignTask,
-  shapeMessage,
+  shapeMessageWithSiblings,
 } from "@/lib/conversation/api";
+import { loadActivePathMessages } from "@/lib/conversation/active-path";
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -14,11 +15,11 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
     const c = await prisma.conversation.findFirst({
       where: { id: params.id, user_id: user.id, deleted_at: null },
       include: {
-        messages: { orderBy: { created_at: "asc" } },
         design_tasks: { orderBy: [{ last_activity_at: { sort: "desc", nulls: "last" } }, { created_at: "desc" }] },
       },
     });
     if (!c) throw new ApiError("RESOURCE_NOT_FOUND", "Conversation not found");
+    const activePath = await loadActivePathMessages(params.id);
     const activeTask =
       c.design_tasks.find((task) => task.id === c.active_design_task_id) ?? null;
     return ok({
@@ -29,10 +30,16 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
       archived: c.archived,
       aiModel: c.ai_model,
       activeDesignTaskId: c.active_design_task_id,
+      activeLeafMessageId: c.active_leaf_message_id,
       lastMessageAt: c.last_message_at,
       createdAt: c.created_at,
       updatedAt: c.updated_at,
-      messages: c.messages.map(shapeMessage),
+      messages: activePath.messages.map((message) =>
+        shapeMessageWithSiblings(
+          message,
+          activePath.metaById.get(message.id) ?? { count: 1, index: 0, ids: [message.id] },
+        ),
+      ),
       designTasks: c.design_tasks.map(shapeDesignTask),
       activeDesignTask: activeTask ? shapeDesignTask(activeTask) : null,
     });
@@ -51,6 +58,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       archived?: boolean;
       aiModel?: string | null;
       activeDesignTaskId?: string | null;
+      activeLeafMessageId?: string | null;
     };
     const data = {
       ...(typeof body.title === "string" ? { title: body.title.trim() || "新對話" } : {}),
@@ -61,6 +69,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         : {}),
       ...(body.activeDesignTaskId !== undefined
         ? { active_design_task_id: body.activeDesignTaskId || null }
+        : {}),
+      ...(body.activeLeafMessageId !== undefined
+        ? { active_leaf_message_id: body.activeLeafMessageId || null }
         : {}),
     };
     const c = await prisma.conversation.update({

@@ -643,27 +643,47 @@ export default async function AdminOrderDetailPage({ params }: { params: { id: s
             </div>
 
             <div className="space-y-3">
-              <div className="text-sm font-medium">訂單聊天室</div>
-              <div className="max-h-[520px] space-y-2 overflow-auto rounded border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">訂單協作對話</div>
+                  <div className="mt-1 text-xs text-neutral-500">這裡送出的回覆與進度，會同步顯示在客戶的訂單頁。</div>
+                </div>
+                <span className="rounded-full border bg-white px-3 py-1 text-xs text-neutral-500">
+                  {order.messages.length} 則訊息
+                </span>
+              </div>
+              <div className="max-h-[520px] space-y-3 overflow-auto rounded-lg border bg-neutral-50 p-3">
                 {order.messages.length === 0 ? (
-                  <div className="text-sm text-neutral-500">尚無訊息。</div>
+                  <div className="rounded border border-dashed bg-white p-4 text-sm text-neutral-500">
+                    尚無訊息。可先發一則進度更新，讓客戶知道目前已進入報價或執行流程。
+                  </div>
                 ) : (
                   order.messages.map((message) => (
-                    <div key={message.id} className="rounded bg-neutral-50 px-3 py-2 text-sm">
-                      <div className="text-xs text-neutral-500">{message.sender_role} · {message.kind} · {new Date(message.created_at).toLocaleString()}</div>
-                      <div className="mt-1 whitespace-pre-wrap">{message.body}</div>
+                    <div
+                      key={message.id}
+                      className={`rounded-lg border px-3 py-2 text-sm shadow-sm ${adminMessageCardClass(message.sender_role)}`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                        <span>{adminMessageSenderLabel(message.sender_role)}</span>
+                        <span className={`rounded-full px-2 py-0.5 ${adminMessageKindClass(message.kind)}`}>
+                          {adminMessageKindLabel(message.kind)}
+                        </span>
+                        <span>{new Date(message.created_at).toLocaleString()}</span>
+                        {message.consumes_revision ? <span className="text-orange-600">扣 1 次修改</span> : null}
+                      </div>
+                      <div className="mt-2 whitespace-pre-wrap leading-6 text-neutral-800">{message.body}</div>
                     </div>
                   ))
                 )}
               </div>
               {!["closed", "cancelled"].includes(order.status) ? (
-                <form action={addProjectOrderMessage} className="rounded border p-3">
+                <form action={addProjectOrderMessage} className="rounded-lg border bg-white p-3 shadow-sm">
                   <input type="hidden" name="order_id" value={order.id} />
                   <textarea
                     name="body"
                     required
                     placeholder="回覆客戶，或更新目前進度"
-                    className="min-h-24 w-full rounded border px-3 py-2 text-sm"
+                    className="min-h-24 w-full rounded-md border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-900"
                   />
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button name="kind" value="message" type="submit" className="rounded border px-3 py-2 text-xs hover:bg-neutral-50">
@@ -829,6 +849,34 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
       <div className="mt-1 font-medium">{children}</div>
     </div>
   );
+}
+
+function adminMessageSenderLabel(role: string) {
+  if (role === "customer") return "客戶";
+  if (role === "reviewer") return "GTL 團隊";
+  if (role === "system") return "系統";
+  return role || "訊息";
+}
+
+function adminMessageKindLabel(kind: string) {
+  if (kind === "progress_update") return "進度更新";
+  if (kind === "revision_request") return "修改需求";
+  if (kind === "system_event") return "系統紀錄";
+  return "對話";
+}
+
+function adminMessageKindClass(kind: string) {
+  if (kind === "progress_update") return "bg-green-50 text-green-700";
+  if (kind === "revision_request") return "bg-orange-50 text-orange-700";
+  if (kind === "system_event") return "bg-neutral-100 text-neutral-600";
+  return "bg-white text-neutral-500";
+}
+
+function adminMessageCardClass(role: string) {
+  if (role === "customer") return "border-orange-100 bg-orange-50/60";
+  if (role === "reviewer") return "border-green-100 bg-white";
+  if (role === "system") return "border-neutral-200 bg-neutral-100/70";
+  return "bg-white";
 }
 
 function recordValue(value: unknown): Record<string, unknown> {

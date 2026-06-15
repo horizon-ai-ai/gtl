@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { ok, fail, handleError, ApiError } from "@/lib/api";
 import { writeOrderStatusHistory } from "@/lib/project-orders";
+import { appendMessage } from "@/lib/conversation/active-path";
 import { cleanTaskSummary, customerInputsText, isDeliveryStatusSummary, valueToRecord } from "@/lib/project-brief";
 import { generateOrderNo } from "@/lib/utils";
 
@@ -639,9 +640,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (body.conversation_id) {
-      await prisma.message.create({
-        data: {
-          conversation_id: body.conversation_id,
+      await appendMessage(body.conversation_id, {
           role: "tool",
           content: {
             type: "order_form",
@@ -659,7 +658,6 @@ export async function POST(req: NextRequest) {
               total: order.total,
             },
           },
-        },
       });
       await prisma.conversation.update({
         where: { id: body.conversation_id },

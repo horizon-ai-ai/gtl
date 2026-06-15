@@ -5,6 +5,7 @@ import { flexionCompleteJSON, pickModel } from "@/lib/flexion";
 import { slugifySiteName, type SitePageSection, type SiteSchema } from "@/lib/site-builder";
 import { publishConversationEvent } from "@/lib/conversation/stream";
 import { shapeMessage } from "@/lib/conversation/api";
+import { appendMessage } from "@/lib/conversation/active-path";
 import {
   getWebsiteCollectionScript,
   WEBSITE_STYLE_OPTIONS,
@@ -66,6 +67,29 @@ type WebsitePatchResult = {
 
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+async function findWebsiteResultMessage(conversationId: string, siteId: string | null | undefined) {
+  if (!siteId) return null;
+  const messages = await prisma.message.findMany({
+    where: {
+      conversation_id: conversationId,
+      message_type: MessageType.generation_result,
+    },
+    orderBy: { created_at: "asc" },
+    take: 80,
+  });
+  return messages.find((message) => {
+    const metadata = recordValue(message.metadata);
+    const websiteBuilder = recordValue(metadata.websiteBuilder);
+    return metadata.siteId === siteId || websiteBuilder.siteId === siteId;
+  }) ?? null;
+}
+
+function appendWebsiteOutputGroup(message: { metadata: Prisma.JsonValue } | null, group: Record<string, unknown>) {
+  const metadata = recordValue(message?.metadata);
+  const outputGroups = Array.isArray(metadata.outputGroups) ? metadata.outputGroups : [];
+  return [...outputGroups, group];
 }
 
 function quickActionsForIntentSelection() {
@@ -419,6 +443,22 @@ function storeWebsiteSupplement(formInput: Record<string, unknown>, text: string
   };
 }
 
+function mergeWebsiteTransferContext(formInput: Record<string, unknown>, context?: string) {
+  const nextContext = context?.trim();
+  if (!nextContext) return formInput;
+  const contentNotes = recordValue(formInput.contentNotes);
+  const previous = textValue(contentNotes.transferContext);
+  const compactContext = nextContext.slice(0, 2400);
+  if (previous.includes(compactContext.slice(0, 240))) return formInput;
+  return {
+    ...formInput,
+    contentNotes: {
+      ...contentNotes,
+      transferContext: previous ? `${previous}\n\n${compactContext}` : compactContext,
+    },
+  };
+}
+
 function metadataBase(params: {
   mode: string;
   siteIntent?: WebsiteSiteIntent | null;
@@ -493,10 +533,11 @@ async function createAssistantMessage(params: {
   text: string;
   metadata: Prisma.InputJsonValue;
   model?: string;
+  parentMessageId?: string | null;
 }) {
-  const message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversationId,
+  const message = await appendMessage(
+    params.conversationId,
+    {
       role: MessageRole.assistant,
       message_type: MessageType.ai,
       content: { type: "text", text: params.text },
@@ -504,7 +545,8 @@ async function createAssistantMessage(params: {
       credits_used: BigInt(0),
       model: params.model || "website-builder-router",
     },
-  });
+    { parentMessageId: params.parentMessageId ?? undefined },
+  );
   publishConversationEvent(params.conversationId, "message.completed", shapeMessage(message));
   return message;
 }
@@ -2118,6 +2160,7 @@ async function createEditedWebsiteMessage(params: {
   siteIntent: WebsiteSiteIntent;
   formInput: Record<string, unknown>;
   instruction: string;
+  parentMessageId?: string | null;
 }) {
   const site = await prisma.site.findFirst({
     where: { id: params.siteId, user_id: params.userId, deleted_at: null },
@@ -2153,6 +2196,7 @@ async function createEditedWebsiteMessage(params: {
         })),
       } as Prisma.InputJsonValue,
       model: "website-builder-editor",
+      parentMessageId: params.parentMessageId,
     });
     return message;
   }
@@ -2191,9 +2235,28 @@ async function createEditedWebsiteMessage(params: {
     },
   });
 
-  const message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversation.id,
+  const existingMessage = await findWebsiteResultMessage(params.conversation.id, updatedSite.id);
+  const outputGroup = {
+    type: "website",
+    title: `網站結果 v${nextVersion}`,
+    versionNumber: nextVersion,
+    items: [
+      {
+        id: `${updatedSite.id}-v${nextVersion}`,
+        label: schema.title,
+        content: patch.changeSummary,
+        artifactKind: "website_html",
+        openTarget: "artifact",
+        siteId: updatedSite.id,
+        schema: schema as SiteSchema,
+        previewHtml: html,
+        htmlCode: html,
+        rawHtml: html,
+        openUrl: `/site-preview/${updatedSite.id}`,
+      },
+    ],
+  };
+  const messageData = {
       role: MessageRole.assistant,
       message_type: MessageType.generation_result,
       content: {
@@ -2247,27 +2310,7 @@ async function createEditedWebsiteMessage(params: {
           changeSummary: patch.changeSummary,
           generatedAt: new Date().toISOString(),
         },
-        outputGroups: [
-          {
-            type: "website",
-            title: "網站結果",
-            items: [
-              {
-                id: `${updatedSite.id}-v${nextVersion}`,
-                label: schema.title,
-                content: patch.changeSummary,
-                artifactKind: "website_html",
-                openTarget: "artifact",
-                siteId: updatedSite.id,
-                schema: schema as SiteSchema,
-                previewHtml: html,
-                htmlCode: html,
-                rawHtml: html,
-                openUrl: `/site-preview/${updatedSite.id}`,
-              },
-            ],
-          },
-        ],
+        outputGroups: appendWebsiteOutputGroup(existingMessage, outputGroup),
         websiteBuilder: {
           mode: "generated",
           siteIntent: params.siteIntent,
@@ -2304,8 +2347,21 @@ async function createEditedWebsiteMessage(params: {
       } as Prisma.InputJsonValue,
       credits_used: BigInt(0),
       model: "website-builder-editor",
-    },
-  });
+  };
+  const message = existingMessage
+    ? await prisma.message.update({
+        where: { id: existingMessage.id },
+        data: { ...messageData, parent_message_id: params.parentMessageId ?? null },
+      })
+    : await appendMessage(params.conversation.id, messageData, {
+        parentMessageId: params.parentMessageId ?? undefined,
+      });
+  if (existingMessage) {
+    await prisma.conversation.update({
+      where: { id: params.conversation.id },
+      data: { active_leaf_message_id: message.id },
+    });
+  }
   publishConversationEvent(params.conversation.id, "generation.result.completed", shapeMessage(message));
   return message;
 }
@@ -2315,6 +2371,7 @@ async function createGeneratedWebsite(params: {
   userId: string;
   siteIntent: WebsiteSiteIntent;
   formInput: Record<string, unknown>;
+  parentMessageId?: string | null;
 }) {
   publishConversationEvent(params.conversation.id, "generation.result.updated", {
     status: "processing",
@@ -2380,9 +2437,9 @@ async function createGeneratedWebsite(params: {
     },
   });
 
-  const message = await prisma.message.create({
-    data: {
-      conversation_id: params.conversation.id,
+  const message = await appendMessage(
+    params.conversation.id,
+    {
       role: MessageRole.assistant,
       message_type: MessageType.generation_result,
       content: {
@@ -2438,6 +2495,7 @@ async function createGeneratedWebsite(params: {
           {
             type: "website",
             title: "一頁式網站",
+            versionNumber: 1,
             items: [
               {
                 id: updatedSite.id,
@@ -2498,7 +2556,8 @@ async function createGeneratedWebsite(params: {
       credits_used: BigInt(0),
       model: "website-builder",
     },
-  });
+    { parentMessageId: params.parentMessageId ?? undefined },
+  );
   publishConversationEvent(params.conversation.id, "generation.result.completed", shapeMessage(message));
   return message;
 }
@@ -2514,10 +2573,13 @@ export async function handleWebsiteBuilderTurn(params: {
   text: string;
   quickReply: Record<string, unknown> | null;
   uploadedImageUrls?: string[];
+  parentMessageId?: string | null;
+  transferContext?: string;
 }): Promise<WebsiteBuilderResult> {
   const memory = websiteMemory(params.conversation);
   const action = typeof params.quickReply?.action === "string" ? params.quickReply.action : undefined;
   const freshRequest = isFreshWebsiteRequest(params.text, action);
+  const memoryFormInput = mergeWebsiteTransferContext(recordValue(memory.formInput), params.transferContext);
   const selectedIntent =
     inferWebsiteIntentFromQuickReply(params.quickReply) ||
     (action === "website_continue_collecting" ? null : inferWebsiteIntentFromText(params.text));
@@ -2557,6 +2619,7 @@ export async function handleWebsiteBuilderTurn(params: {
         }),
         quickActions: quickActionsForIntentSelection(),
       } as Prisma.InputJsonValue,
+      parentMessageId: params.parentMessageId,
     });
     await prisma.conversation.update({
       where: { id: params.conversation.id },
@@ -2566,7 +2629,7 @@ export async function handleWebsiteBuilderTurn(params: {
   }
 
   if (activeIntent && isProductWebsiteIntent(activeIntent) && isProductMutationRequest(params.text, action)) {
-    const formInput = recordValue(memory.formInput);
+    const formInput = memoryFormInput;
     const productStep = getWebsiteCollectionScript(activeIntent).find((step) => step.widget.kind === "product-card");
     if (productStep) {
       const productOptions = await listOwnedProductOptions(params.userId);
@@ -2591,6 +2654,7 @@ export async function handleWebsiteBuilderTurn(params: {
           }),
           quickActions: buildCollectionQuickActions(productStep, activeIntent),
         } as Prisma.InputJsonValue,
+        parentMessageId: params.parentMessageId,
       });
       await prisma.conversation.update({
         where: { id: params.conversation.id },
@@ -2601,7 +2665,7 @@ export async function handleWebsiteBuilderTurn(params: {
   }
 
   if (selectedIntent && !memory.siteIntent) {
-    const formInput = recordValue(memory.formInput);
+    const formInput = memoryFormInput;
     const state = buildCollectionState(selectedIntent, formInput);
     const step = state.currentStep;
     const productOptions = step.widget.kind === "product-card" ? await listOwnedProductOptions(params.userId) : [];
@@ -2627,6 +2691,7 @@ export async function handleWebsiteBuilderTurn(params: {
         }),
         quickActions: buildCollectionQuickActions(step, selectedIntent),
       } as Prisma.InputJsonValue,
+      parentMessageId: params.parentMessageId,
     });
     await prisma.conversation.update({
       where: { id: params.conversation.id },
@@ -2642,7 +2707,7 @@ export async function handleWebsiteBuilderTurn(params: {
     action !== "website_select_intent" &&
     !memory.siteId
   ) {
-    const formInput = seedFormInputForWebsiteIntent(activeIntent, storeWebsiteSupplement(recordValue(memory.formInput), params.text));
+    const formInput = seedFormInputForWebsiteIntent(activeIntent, storeWebsiteSupplement(memoryFormInput, params.text));
     const nextMemory = mergeWebsiteMemory(params.conversation, {
       kind: "website_builder",
       siteIntent: activeIntent,
@@ -2666,6 +2731,7 @@ export async function handleWebsiteBuilderTurn(params: {
         }),
         quickActions: websiteSupplementQuickActions(),
       } as Prisma.InputJsonValue,
+      parentMessageId: params.parentMessageId,
     });
     await prisma.conversation.update({
       where: { id: params.conversation.id },
@@ -2693,7 +2759,7 @@ export async function handleWebsiteBuilderTurn(params: {
           conversationId: params.conversation.id,
           text: "HTML 已準備好，可以在右側結果面板切到 HTML 查看。",
           metadata: {
-            type: "generation_result",
+            type: "website_view_code",
             source: "conversations.messages.website-builder.view-code",
             phase: "website_builder",
             status: "completed",
@@ -2733,10 +2799,11 @@ export async function handleWebsiteBuilderTurn(params: {
               mode: "generated",
               siteIntent: activeIntent,
               siteId: site.id,
-              formInput: recordValue(memory.formInput),
+              formInput: memoryFormInput,
             },
             quickActions: [],
           } as Prisma.InputJsonValue,
+          parentMessageId: params.parentMessageId,
         });
         return { handled: true, assistantMessage };
       }
@@ -2746,13 +2813,14 @@ export async function handleWebsiteBuilderTurn(params: {
       userId: params.userId,
       siteId: memory.siteId,
       siteIntent: activeIntent,
-      formInput: recordValue(memory.formInput),
+      formInput: memoryFormInput,
       instruction: params.text,
+      parentMessageId: params.parentMessageId,
     });
     if (editedMessage) return { handled: true, assistantMessage: editedMessage };
   }
   if (!activeIntent) {
-    const formInput = recordValue(memory.formInput);
+    const formInput = memoryFormInput;
     const nextMemory = mergeWebsiteMemory(params.conversation, {
       kind: "website_builder",
       siteIntent: null,
@@ -2774,6 +2842,7 @@ export async function handleWebsiteBuilderTurn(params: {
         }),
         quickActions: quickActionsForIntentSelection(),
       } as Prisma.InputJsonValue,
+      parentMessageId: params.parentMessageId,
     });
     await prisma.conversation.update({
       where: { id: params.conversation.id },
@@ -2782,7 +2851,7 @@ export async function handleWebsiteBuilderTurn(params: {
     return { handled: true, assistantMessage };
   }
 
-  let formInput = recordValue(memory.formInput);
+  let formInput = memoryFormInput;
   if (memory.siteIntent && action !== "website_generate" && action !== "website_select_intent") {
     formInput = storeSubmittedInput({
       siteIntent: activeIntent,
@@ -2802,6 +2871,7 @@ export async function handleWebsiteBuilderTurn(params: {
       userId: params.userId,
       siteIntent: activeIntent,
       formInput,
+      parentMessageId: params.parentMessageId,
     });
     return { handled: true, assistantMessage };
   }
@@ -2833,6 +2903,7 @@ export async function handleWebsiteBuilderTurn(params: {
       }),
       quickActions: buildCollectionQuickActions(step, activeIntent),
     } as Prisma.InputJsonValue,
+    parentMessageId: params.parentMessageId,
   });
   await prisma.conversation.update({
     where: { id: params.conversation.id },

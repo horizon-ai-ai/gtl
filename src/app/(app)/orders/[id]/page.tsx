@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -183,6 +183,14 @@ function messageKindLabel(kind: string) {
   return "對話";
 }
 
+function messageKindClass(kind: string, onDark = false) {
+  if (onDark) return "bg-canvas/15 text-canvas";
+  if (kind === "progress_update") return "bg-brand-50 text-brand-600";
+  if (kind === "revision_request") return "bg-accent-50 text-accent-600";
+  if (kind === "system_event") return "bg-sunken text-ink-500";
+  return "bg-surface text-ink-500";
+}
+
 function eventSummary(event: OrderEvent) {
   const data = recordValue(event.data);
   const metadata = recordValue(data.metadata);
@@ -274,24 +282,37 @@ export default function OrderDetailPage() {
   const [messageDraft, setMessageDraft] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
 
-  useEffect(() => {
-    void loadOrder();
-  }, [params.id]);
-
-  async function loadOrder() {
-    setLoading(true);
-    setError("");
+  const loadOrder = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true);
+      setError("");
+    }
     const res = await fetch(`/api/orders/${params.id}`);
     const json = await res.json();
     if (!res.ok) {
       setError(json.error?.message ?? "訂單載入失敗");
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
       return;
     }
     setOrder(json.data);
-    setLoading(false);
-  }
+    setLastSyncedAt(new Date());
+    if (!options?.silent) setLoading(false);
+  }, [params.id]);
+
+  useEffect(() => {
+    void loadOrder();
+  }, [loadOrder]);
+
+  useEffect(() => {
+    if (!order?.project_type) return;
+    if (order.status === "closed" || order.status === "cancelled" || order.status === "canceled") return;
+    const timer = window.setInterval(() => {
+      void loadOrder({ silent: true });
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [loadOrder, order?.id, order?.project_type, order?.status]);
 
   function updateOrder(patch: Partial<Order>) {
     setOrder((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -466,7 +487,7 @@ export default function OrderDetailPage() {
       setProjectBusy(false);
       return;
     }
-    await loadOrder();
+    await loadOrder({ silent: true });
     setNotice(kind === "revision_request" ? "修改需求已送出" : "訊息已送出");
     setProjectBusy(false);
   }
@@ -653,6 +674,7 @@ export default function OrderDetailPage() {
                 onDraftChange={setMessageDraft}
                 busy={projectBusy}
                 status={order.status}
+                lastSyncedAt={lastSyncedAt}
                 onSend={(kind) => void sendProjectMessage(kind)}
               />
             </div>
@@ -1023,6 +1045,7 @@ function OrderChatPanel({
   onDraftChange,
   busy,
   status,
+  lastSyncedAt,
   onSend,
 }: {
   messages: OrderMessage[];
@@ -1030,37 +1053,64 @@ function OrderChatPanel({
   onDraftChange: (value: string) => void;
   busy: boolean;
   status: string;
+  lastSyncedAt: Date | null;
   onSend: (kind: "message" | "revision_request") => void;
 }) {
   const isClosed = status === "closed" || status === "cancelled" || status === "canceled";
   const canRequestRevision = status === "confirmed" || status === "in_execution";
+  const latestMessage = messages[messages.length - 1];
 
   return (
-    <div className="rounded-md border bg-white p-4">
+    <div className="rounded-lg border border-line1 bg-surface p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-medium">後續對話</div>
+          <div className="text-sm font-semibold text-ink-900">訂單協作對話</div>
           <p className="mt-1 text-xs leading-5 text-neutral-500">
-            管理員回覆、進度更新與你的補充需求都會留在這裡。
+            管理員回覆、進度更新與你的補充需求會即時同步到同一張訂單。
           </p>
+        </div>
+        <div className="rounded-pill border border-line1 bg-sunken px-3 py-1 text-xs text-ink-500">
+          {busy ? "同步中..." : lastSyncedAt ? `已同步 ${lastSyncedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "等待同步"}
         </div>
       </div>
 
-      <div className="mt-3 max-h-96 space-y-2 overflow-auto rounded-md border bg-neutral-50 p-3">
+      {latestMessage ? (
+        <div className="mt-3 rounded-md border border-line1 bg-sunken/70 px-3 py-2 text-xs text-ink-500">
+          最新：{messageSenderLabel(latestMessage.sender_role)}在 {new Date(latestMessage.created_at).toLocaleString()} 更新
+        </div>
+      ) : null}
+
+      <div className="mt-3 max-h-96 space-y-3 overflow-auto rounded-md border border-line1 bg-sunken/60 p-3">
         {messages.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-white p-4 text-sm text-neutral-500">
+          <div className="rounded-md border border-dashed border-line2 bg-surface p-4 text-sm text-neutral-500">
             尚無對話。你可以先留言補充需求，GTL 團隊回覆後也會出現在這裡。
           </div>
         ) : (
           messages.map((message) => {
             const fromCustomer = message.sender_role === "customer";
+            const fromSystem = message.sender_role === "system";
             return (
-              <div key={message.id} className={`flex ${fromCustomer ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[82%] rounded-md border px-3 py-2 text-sm ${fromCustomer ? "bg-neutral-900 text-white" : "bg-white text-neutral-800"}`}>
-                  <div className={`text-xs ${fromCustomer ? "text-white/65" : "text-neutral-500"}`}>
-                    {messageSenderLabel(message.sender_role)} · {messageKindLabel(message.kind)} · {new Date(message.created_at).toLocaleString()}
+              <div key={message.id} className={`flex ${fromSystem ? "justify-center" : fromCustomer ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[86%] rounded-lg border px-3 py-2 text-sm shadow-xs ${
+                    fromSystem
+                      ? "border-line1 bg-canvas text-ink-500"
+                      : fromCustomer
+                        ? "border-ink-900 bg-ink-900 text-canvas"
+                        : "border-line1 bg-surface text-ink-700"
+                  }`}
+                >
+                  <div className={`flex flex-wrap items-center gap-2 text-xs ${fromCustomer ? "text-canvas/70" : "text-ink-400"}`}>
+                    <span>{messageSenderLabel(message.sender_role)}</span>
+                    <span className={`rounded-pill px-2 py-0.5 ${messageKindClass(message.kind, fromCustomer)}`}>
+                      {messageKindLabel(message.kind)}
+                    </span>
+                    <span>{new Date(message.created_at).toLocaleString()}</span>
                   </div>
-                  <div className="mt-1 whitespace-pre-wrap leading-6">{message.body}</div>
+                  <div className="mt-2 whitespace-pre-wrap leading-6">{message.body}</div>
+                  {message.consumes_revision ? (
+                    <div className="mt-2 text-xs text-accent-300">已計入一次修改額度</div>
+                  ) : null}
                 </div>
               </div>
             );
@@ -1073,7 +1123,7 @@ function OrderChatPanel({
           <textarea
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
-            className="mt-3 min-h-24 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+            className="mt-3 min-h-24 w-full rounded-md border border-line1 bg-sunken px-3 py-2 text-sm text-ink-900 outline-none transition-[box-shadow,border] duration-120 ease-smooth placeholder:text-ink-400 focus:border-accent-500 focus:shadow-[var(--shadow-focus)]"
             placeholder="輸入想補充的需求、問題，或回覆 GTL 團隊"
           />
           <div className="mt-3 flex flex-wrap gap-2">
@@ -1090,7 +1140,7 @@ function OrderChatPanel({
               作為修改需求送出
             </Button>
             {!canRequestRevision ? (
-              <div className="self-center text-xs text-neutral-500">修改需求會在訂金確認後開啟。</div>
+              <div className="self-center text-xs text-neutral-500">修改需求會在訂金確認後開啟；一般補充可先送出。</div>
             ) : null}
           </div>
         </>

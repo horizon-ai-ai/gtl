@@ -57,16 +57,34 @@ const messageDelegate = {
     if (data.metadata) row.metadata = data.metadata as Record<string, unknown>;
     return { ...row };
   }),
+  updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+    let count = 0;
+    for (const row of messageStore.values()) {
+      if (!matches(row, where)) continue;
+      Object.assign(row, data);
+      count += 1;
+    }
+    return { count };
+  }),
 };
 
-jest.mock("@/lib/db", () => ({
-  prisma: {
+jest.mock("@/lib/db", () => {
+  const prisma = {
     message: messageDelegate,
     designTask: { update: jest.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: "task_1", ...data })) },
-    conversation: { update: jest.fn(async () => ({})) },
-    $transaction: jest.fn(async (ops: Array<Promise<unknown>>) => Promise.all(ops)),
-  },
-}));
+    conversation: {
+      findUnique: jest.fn(async () => ({ active_leaf_message_id: null })),
+      update: jest.fn(async () => ({})),
+    },
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (arg: unknown) =>
+    typeof arg === "function"
+      ? (arg as (tx: typeof prisma) => Promise<unknown>)(prisma)
+      : Promise.all(arg as Array<Promise<unknown>>),
+  );
+  return { prisma };
+});
 
 const generateBananaImagesMock = jest.fn();
 jest.mock("@/lib/banana-image", () => ({

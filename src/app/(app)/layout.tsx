@@ -26,13 +26,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       deleted_at: null,
     },
     orderBy: [
+      { pinned: "desc" },
       { last_message_at: { sort: "desc", nulls: "last" } },
       { updated_at: "desc" },
     ],
-    take: 8,
+    take: 30,
     select: {
       id: true,
       title: true,
+      pinned: true,
+      last_message_at: true,
+      created_at: true,
     },
   });
 
@@ -52,6 +56,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       recentConversations={recentConversations.map((conversation) => ({
         id: conversation.id,
         title: conversation.title,
+        pinned: conversation.pinned,
+        lastMessageAt: conversation.last_message_at?.toISOString() ?? null,
+        createdAt: conversation.created_at.toISOString(),
       }))}
       logoutAction={logoutAction}
     >

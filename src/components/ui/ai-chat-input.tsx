@@ -1,12 +1,13 @@
 "use client";
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Loader2, Plus, Send, X } from "lucide-react";
+import { FileText, Loader2, Plus, Send, Square, X } from "lucide-react";
 
 type AIChatInputProps = {
   value: string;
   onChange: (value: string) => void;
   onSend: (value: string, files?: File[]) => void;
+  onStop?: () => void;
   loading?: boolean;
   placeholder?: string;
 };
@@ -62,6 +63,7 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
   value,
   onChange,
   onSend,
+  onStop,
   loading = false,
   placeholder = "輸入你想做的設計、文案或網頁...",
 }, ref) {
@@ -211,19 +213,29 @@ const AIChatInput = forwardRef<HTMLTextAreaElement, AIChatInputProps>(function A
             }
           }}
           placeholder={placeholder}
-          disabled={loading}
           rows={1}
           className="max-h-40 min-h-12 flex-1 resize-none border-0 bg-transparent px-4 py-3 text-[15px] leading-6 text-ink-900 outline-none placeholder:text-ink-400"
         />
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSend}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-[transform,box-shadow,opacity] duration-120 ease-snap hover:-translate-y-px hover:shadow-md active:scale-[0.97] disabled:cursor-not-allowed disabled:translate-y-0 disabled:scale-100 disabled:opacity-35 bg-g3-brand"
-          aria-label="送出"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        </button>
+        {loading && onStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-ink-900 text-white shadow-sm transition-[transform,box-shadow] duration-120 ease-snap hover:-translate-y-px hover:shadow-md active:scale-[0.97]"
+            aria-label="停止生成"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSend}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition-[transform,box-shadow,opacity] duration-120 ease-snap hover:-translate-y-px hover:shadow-md active:scale-[0.97] disabled:cursor-not-allowed disabled:translate-y-0 disabled:scale-100 disabled:opacity-35 bg-g3-brand"
+            aria-label="送出"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        )}
       </div>
     </div>
   );

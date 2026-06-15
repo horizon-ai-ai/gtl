@@ -266,6 +266,7 @@ model Conversation {
   last_message_at       DateTime?
   ai_model              String?
   active_design_task_id String?   @db.Uuid
+  active_leaf_message_id String?  @db.Uuid
   shared_brand_context  Json?
   project_memory        Json?
   created_at            DateTime  @default(now())
@@ -279,24 +280,28 @@ model Conversation {
 }
 
 model Message {
-  id              String       @id @default(uuid()) @db.Uuid
-  conversation_id String       @db.Uuid
-  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
-  role            MessageRole
-  message_type    MessageType  @default(ai)
-  content         Json
-  tool_calls      Json?
-  metadata        Json?
-  design_task_id  String?      @db.Uuid
-  design_task     DesignTask?  @relation(fields: [design_task_id], references: [id], onDelete: SetNull)
-  tokens_input    Int          @default(0)
-  tokens_output   Int          @default(0)
-  credits_used    BigInt       @default(0)
-  model           String?
-  created_at      DateTime     @default(now())
+  id                 String       @id @default(uuid()) @db.Uuid
+  conversation_id    String       @db.Uuid
+  conversation       Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  role               MessageRole
+  message_type       MessageType  @default(ai)
+  content            Json
+  tool_calls         Json?
+  metadata           Json?
+  design_task_id     String?      @db.Uuid
+  design_task        DesignTask?  @relation(fields: [design_task_id], references: [id], onDelete: SetNull)
+  parent_message_id  String?      @db.Uuid
+  parent             Message?     @relation("MessageChildren", fields: [parent_message_id], references: [id], onDelete: SetNull)
+  children           Message[]    @relation("MessageChildren")
+  tokens_input       Int          @default(0)
+  tokens_output      Int          @default(0)
+  credits_used       BigInt       @default(0)
+  model              String?
+  created_at         DateTime     @default(now())
 
   @@index([conversation_id, created_at])
   @@index([design_task_id, created_at])
+  @@index([parent_message_id])
 }
 
 enum MessageRole {

@@ -3,6 +3,9 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Download,
   Eye,
@@ -13,17 +16,19 @@ import {
   Image as ImageIcon,
   Loader2,
   Maximize2,
+  MessageSquare,
   PanelRightOpen,
   Send,
   X,
 } from "lucide-react";
 import AIChatInput from "@/components/ui/ai-chat-input";
 import { HeroBreathing } from "@/components/app/hero-breathing";
-import ConversationInterface from "@/components/ui/conversation-interface";
+import ConversationInterface, { MarkdownText, type GenerationArtifactSummary } from "@/components/ui/conversation-interface";
 import { PromptChips } from "@/components/ui/prompt-chips";
 import { DEFAULT_PROMPT_CHIPS } from "@/lib/chips/default-prompts";
 import { SiteRenderer } from "@/components/site-renderer";
 import { useConversations } from "@/hooks/useConversations";
+import { isEditWithinGenerationLineage } from "@/lib/conversation/edit-lineage";
 import { cleanTaskSummary } from "@/lib/project-brief";
 import type { SiteSchema } from "@/lib/site-builder";
 import type { ChatMessage, DesignTaskStarter, QuickAction } from "@/types/conversation";
@@ -44,7 +49,7 @@ type ApiEnvelope<T> = {
   };
 };
 
-type GenerationStatus = "queued" | "processing" | "completed" | "failed" | "error" | "idle";
+type GenerationStatus = "queued" | "processing" | "streaming" | "completed" | "failed" | "error" | "idle";
 
 type GenerationImageItem = {
   id: string;
@@ -71,6 +76,7 @@ type GenerationWebsiteItem = {
 };
 
 type GenerationResultView = {
+  viewId: string;
   messageId: string;
   taskId?: string | null;
   taskType?: string | null;
@@ -82,6 +88,10 @@ type GenerationResultView = {
   versionNumber: number;
   expectedOutputCount: number;
   receivedOutputCount: number;
+  // Carried from metadata.domain so the panel can pick the right placeholder
+  // (image grid vs text shell) before any items have arrived. Without this,
+  // a text-task generation_result briefly renders "等待圖像" slots.
+  domain: "image" | "text" | "web" | null;
   images: GenerationImageItem[];
   textItems: GenerationTextItem[];
   websiteItems: GenerationWebsiteItem[];
@@ -99,12 +109,24 @@ type TextArtifactView = {
 
 type WorkspaceMode = "generation" | "text";
 
+type ConversationHistoryItem = {
+  id: string;
+  title: string | null;
+  lastMessageAt?: string | null;
+  createdAt?: string | null;
+};
+
 function recordValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function metadataStatus(value: unknown) {
+  const status = recordValue(value).status;
+  return typeof status === "string" ? status : "";
 }
 
 function numberValue(value: unknown, fallback: number) {
@@ -115,13 +137,117 @@ function quickActionsFromMetadata(metadata: Record<string, unknown>) {
   return Array.isArray(metadata.quickActions) ? (metadata.quickActions as QuickAction[]) : [];
 }
 
-function imageItemsFromMessage(message: ChatMessage) {
+function formatHistoryTime(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function ConversationHistoryMenu({
+  open,
+  items,
+  activeConversationId,
+  loading,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  items: ConversationHistoryItem[];
+  activeConversationId: string | null;
+  loading: boolean;
+  onClose: () => void;
+  onSelect: (id: string) => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 bg-canvas/85 p-4 backdrop-blur-sm">
+      <button
+        type="button"
+        aria-label="關閉歷史對話"
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+      />
+      <div className="relative mx-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-line1 bg-surface shadow-lg">
+        <div className="flex items-start justify-between gap-4 border-b border-line1 px-6 py-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink-400">Conversation history</div>
+            <h2 className="mt-2 font-display text-2xl font-medium text-ink-900">歷史對話</h2>
+            <p className="mt-1 text-sm text-ink-500">選一筆對話後，會回到同一個對話工作區繼續操作。</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-400 transition hover:bg-hover hover:text-ink-900"
+            aria-label="關閉"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {loading && items.length === 0 ? (
+            <div className="grid gap-2">
+              {Array.from({ length: 8 }).map((_, index) => (
+                <div key={index} className="h-16 animate-pulse rounded-xl bg-sunken" />
+              ))}
+            </div>
+          ) : items.length > 0 ? (
+            <div className="grid gap-2">
+              {items.map((item) => {
+                const active = item.id === activeConversationId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      onSelect(item.id);
+                      onClose();
+                    }}
+                    className={[
+                      "flex w-full items-center gap-4 rounded-xl px-4 py-3 text-left transition duration-120 ease-smooth hover:bg-hover",
+                      active ? "bg-brand-50 text-brand-700" : "text-ink-700",
+                    ].join(" ")}
+                  >
+                    <span className={active ? "h-2.5 w-2.5 shrink-0 rounded-full bg-brand-500" : "h-2.5 w-2.5 shrink-0 rounded-full bg-ink-300"} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold">{item.title || "新對話"}</span>
+                      <span className="mt-1 block text-xs text-ink-400">{formatHistoryTime(item.lastMessageAt || item.createdAt)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-ink-400">還沒有歷史對話</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function outputGroupsFromMessage(message: ChatMessage) {
   const metadata = recordValue(message.metadata);
-  const outputGroups = Array.isArray(metadata.outputGroups) ? metadata.outputGroups : [];
+  return Array.isArray(metadata.outputGroups) ? metadata.outputGroups : [];
+}
+
+function outputGroupVersionNumber(groupValue: unknown, fallback: number) {
+  const group = recordValue(groupValue);
+  const version = Number(group.versionNumber);
+  return Number.isFinite(version) && version > 0 ? version : fallback;
+}
+
+function imageItemsFromMessage(message: ChatMessage, groups = outputGroupsFromMessage(message)) {
+  const metadata = recordValue(message.metadata);
   const generatedImages = Array.isArray(metadata.generatedImages) ? metadata.generatedImages : [];
   const items: GenerationImageItem[] = [];
 
-  for (const groupValue of outputGroups) {
+  for (const groupValue of groups) {
     const group = recordValue(groupValue);
     const groupItems = Array.isArray(group.items) ? group.items : [group];
 
@@ -155,12 +281,10 @@ function imageItemsFromMessage(message: ChatMessage) {
   return fallbackItems;
 }
 
-function textItemsFromMessage(message: ChatMessage) {
-  const metadata = recordValue(message.metadata);
-  const outputGroups = Array.isArray(metadata.outputGroups) ? metadata.outputGroups : [];
+function textItemsFromMessage(message: ChatMessage, groups = outputGroupsFromMessage(message)) {
   const items: GenerationTextItem[] = [];
 
-  for (const groupValue of outputGroups) {
+  for (const groupValue of groups) {
     const group = recordValue(groupValue);
     const groupItems = Array.isArray(group.items) ? group.items : [group];
 
@@ -187,9 +311,17 @@ function textItemsFromMessage(message: ChatMessage) {
   }
 
   if (items.length > 0) return items;
-  const content = typeof message.content === "string" ? message.content : "";
-  return content
-    ? [{ id: `${message.id}-text-1`, label: "生成內容", content }]
+  // Streaming fallback: during regen the dispatcher updates the content
+  // envelope ({ type, text, ... }) on every token but only writes outputGroups
+  // at completion. Pull the in-flight text so the panel renders progressively
+  // instead of waiting for the final commit and dumping everything at once.
+  if (typeof message.content === "string" && message.content) {
+    return [{ id: `${message.id}-text-1`, label: "生成內容", content: message.content }];
+  }
+  const envelope = recordValue(message.content);
+  const streamingText = stringValue(envelope.text);
+  return streamingText
+    ? [{ id: `${message.id}-text-1`, label: "生成內容", content: streamingText }]
     : [];
 }
 
@@ -198,13 +330,12 @@ function isSiteSchema(value: unknown): value is SiteSchema {
   return typeof record.title === "string" && Array.isArray(record.sections);
 }
 
-function websiteItemsFromMessage(message: ChatMessage) {
+function websiteItemsFromMessage(message: ChatMessage, groups = outputGroupsFromMessage(message), allowArtifactFallback = true) {
   const metadata = recordValue(message.metadata);
-  const outputGroups = Array.isArray(metadata.outputGroups) ? metadata.outputGroups : [];
   const artifact = recordValue(metadata.artifact);
   const items: GenerationWebsiteItem[] = [];
 
-  for (const groupValue of outputGroups) {
+  for (const groupValue of groups) {
     const group = recordValue(groupValue);
     const groupItems = Array.isArray(group.items) ? group.items : [group];
 
@@ -233,7 +364,7 @@ function websiteItemsFromMessage(message: ChatMessage) {
     }
   }
 
-  if (items.length === 0) {
+  if (allowArtifactFallback && items.length === 0) {
     const previewHtml = stringValue(artifact.previewHtml) || stringValue(artifact.rawHtml) || stringValue(artifact.htmlCode);
     const schema = artifact.siteSpec;
     if (previewHtml || isSiteSchema(schema)) {
@@ -253,16 +384,39 @@ function websiteItemsFromMessage(message: ChatMessage) {
   return items;
 }
 
-function generationResultFromMessage(message: ChatMessage): GenerationResultView | null {
+function resolveResultDomain(
+  metadata: Record<string, unknown>,
+  websiteItems: GenerationWebsiteItem[],
+  textItems: GenerationTextItem[],
+  images: GenerationImageItem[],
+): "image" | "text" | "web" | null {
+  const declared = stringValue(metadata.domain);
+  if (declared === "image" || declared === "text" || declared === "web") return declared;
+  // Fall back to whichever item bucket already has content. For a fresh
+  // queued placeholder all buckets are empty — return null and let the panel
+  // pick a neutral loading state.
+  if (websiteItems.length > 0) return "web";
+  if (images.length > 0) return "image";
+  if (textItems.length > 0) return "text";
+  return null;
+}
+
+function generationResultFromMessage(message: ChatMessage, groups?: unknown[], versionFallback = 1): GenerationResultView | null {
   const metadata = recordValue(message.metadata);
   const metadataType = stringValue(metadata.type);
   if (message.messageType !== "generation_result" && metadataType !== "generation_result") return null;
 
   const status = stringValue(metadata.status) || "completed";
-  const images = imageItemsFromMessage(message);
-  const textItems = textItemsFromMessage(message);
-  const websiteItems = websiteItemsFromMessage(message);
+  const selectedGroups = groups ?? outputGroupsFromMessage(message);
+  const images = imageItemsFromMessage(message, selectedGroups);
+  const textItems = textItemsFromMessage(message, selectedGroups);
+  const websiteItems = websiteItemsFromMessage(message, selectedGroups, !groups);
+  const versionNumber = groups?.length === 1
+    ? outputGroupVersionNumber(groups[0], numberValue(metadata.versionNumber, versionFallback))
+    : numberValue(metadata.versionNumber, versionFallback);
+  const domain = resolveResultDomain(metadata, websiteItems, textItems, images);
   return {
+    viewId: `${message.id}:v${versionNumber}`,
     messageId: message.id,
     taskId: stringValue(metadata.taskId) || message.designTaskId || null,
     taskType: stringValue(metadata.taskType) || null,
@@ -270,18 +424,31 @@ function generationResultFromMessage(message: ChatMessage): GenerationResultView
     generationThreadId: stringValue(metadata.generationThreadId) || null,
     sourceMessageId: stringValue(metadata.sourceMessageId) || null,
     parentMessageId: stringValue(metadata.parentMessageId) || null,
-    status: (status === "queued" || status === "processing" || status === "completed" || status === "failed" || status === "error"
+    status: (status === "queued" || status === "processing" || status === "streaming" || status === "completed" || status === "failed" || status === "error"
       ? status
       : "completed") as GenerationStatus,
-    versionNumber: numberValue(metadata.versionNumber, 1),
+    versionNumber,
     expectedOutputCount: numberValue(metadata.expectedOutputCount, Math.max(images.length, 1)),
     receivedOutputCount: numberValue(metadata.receivedOutputCount, Math.max(images.length, textItems.length)),
+    domain,
     images,
     textItems,
     websiteItems,
     quickActions: quickActionsFromMetadata(metadata),
     createdAt: message.createdAt,
   };
+}
+
+function generationResultsFromMessage(message: ChatMessage): GenerationResultView[] {
+  // Append-only: one message = one version. The dispatcher writes a fresh
+  // generation_result message per dispatch, so we no longer fan multiple
+  // versions out of a single message's outputGroups.
+  const result = generationResultFromMessage(message);
+  return result ? [result] : [];
+}
+
+function generationThreadKey(result: GenerationResultView) {
+  return result.generationThreadId || result.taskId || result.messageId;
 }
 
 function textLineCount(text: string) {
@@ -327,6 +494,10 @@ function textBytesLabel(text: string) {
 
 function isGenerateAction(action: QuickAction) {
   return action.action === "proceed_generate" || action.type === "regenerate_design";
+}
+
+function isRegenerateAction(action: QuickAction) {
+  return action.type === "regenerate_design" || action.action === "regenerate_design";
 }
 
 function isFillAction(action: QuickAction) {
@@ -402,7 +573,7 @@ function CreditFooter({ usage, error }: { usage: UsagePayload | null; error: str
 
 function statusLabel(status: GenerationStatus) {
   if (status === "queued") return "已排隊";
-  if (status === "processing") return "生成中";
+  if (status === "processing" || status === "streaming") return "生成中";
   if (status === "completed") return "已完成";
   if (status === "failed" || status === "error") return "失敗";
   return "待命";
@@ -410,7 +581,7 @@ function statusLabel(status: GenerationStatus) {
 
 function statusDotClass(status: GenerationStatus) {
   if (status === "queued") return "bg-warn-500 shadow-[0_0_0_3px_color-mix(in_srgb,var(--warn-500)_14%,transparent)]";
-  if (status === "processing") return "bg-brand-500 status-dot-processing";
+  if (status === "processing" || status === "streaming") return "bg-brand-500 status-dot-processing";
   if (status === "completed") return "bg-ok-500 shadow-[0_0_0_3px_color-mix(in_srgb,var(--ok-500)_14%,transparent)]";
   if (status === "failed" || status === "error") return "bg-err-500 shadow-[0_0_0_3px_color-mix(in_srgb,var(--err-500)_14%,transparent)]";
   return "bg-ink-300";
@@ -470,7 +641,9 @@ function TextArtifactWorkspacePanel({
 
       <div className="scrollbar-none min-h-0 flex-1 overflow-auto px-5 pb-5">
         <div className="min-h-full rounded-lg border border-line1 bg-sunken/70 p-5 shadow-inner">
-          <div className="whitespace-pre-wrap font-sans text-sm leading-7 text-ink-700">{body || "內容尚未準備好"}</div>
+          <div className="font-sans text-sm leading-7 text-ink-700">
+            {body ? <MarkdownText text={body} /> : "內容尚未準備好"}
+          </div>
         </div>
       </div>
 
@@ -503,6 +676,7 @@ function GenerationWorkspacePanel({
   onClose,
   onQuickAction,
   onCreateProjectOrder,
+  onCancel,
 }: {
   result: GenerationResultView | null;
   versions: GenerationResultView[];
@@ -512,6 +686,7 @@ function GenerationWorkspacePanel({
   onClose: () => void;
   onQuickAction: (action: QuickAction) => void;
   onCreateProjectOrder: (result: GenerationResultView) => void;
+  onCancel: (result: GenerationResultView) => void;
 }) {
   const [websiteViewMode, setWebsiteViewMode] = useState<"preview" | "html">("preview");
   const [websiteEditText, setWebsiteEditText] = useState("");
@@ -519,16 +694,45 @@ function GenerationWorkspacePanel({
   const textItems = result?.textItems ?? [];
   const websiteItems = result?.websiteItems ?? [];
   const websiteItem = websiteItems[0] ?? null;
-  const isWebsiteResult = Boolean(websiteItem);
+  // Pick the layout by declared domain first, falling back to whichever item
+  // bucket has content. This stops text-task placeholders from rendering
+  // the image grid + "等待圖像" slots before any tokens arrive.
+  const resultDomain = result?.domain ?? (websiteItem ? "web" : textItems.length > 0 ? "text" : images.length > 0 ? "image" : null);
+  const isWebsiteResult = resultDomain === "web" && Boolean(websiteItem);
+  const isTextResult = resultDomain === "text";
+  const isImageResult = resultDomain === "image" || resultDomain === null;
   const visibleQuickActions = (result?.quickActions ?? []).filter((action) => {
     const actionType = action.action || action.type;
-    return actionType !== "website_view_code";
+    if (actionType === "website_view_code") return false;
+    // The chat bubble already has a 重生 button + version pager. Hide all
+    // task-action chips (再生一版 / 調整內容 / proceed_generate / provide_core_info)
+    // from the panel footer so they don't duplicate that affordance.
+    if (action.type === "regenerate_design") return false;
+    if (actionType === "regenerate_design") return false;
+    if (actionType === "proceed_generate") return false;
+    if (actionType === "provide_core_info") return false;
+    if (actionType === "use_placeholder") return false;
+    if (action.type === "quick_reply" && action.taskId) return false;
+    if (typeof action.value === "string") {
+      const v = action.value;
+      if (v.startsWith("我想調整內容") || v.startsWith("再生一版")) return false;
+    }
+    return true;
   });
   const pendingSlots = result
     ? Math.max(0, result.expectedOutputCount - Math.max(result.receivedOutputCount, images.length, websiteItems.length))
     : 0;
-  const isWorking = result?.status === "queued" || result?.status === "processing";
+  const isWorking =
+    result?.status === "queued" ||
+    result?.status === "processing" ||
+    result?.status === "streaming";
   const websiteHtml = websiteItem?.htmlCode || websiteItem?.rawHtml || websiteItem?.previewHtml || "";
+  const activeVersionIndex = result ? versions.findIndex((version) => version.viewId === result.viewId) : -1;
+  const previousVersion = activeVersionIndex > 0 ? versions[activeVersionIndex - 1] : null;
+  const nextVersion =
+    activeVersionIndex >= 0 && activeVersionIndex < versions.length - 1
+      ? versions[activeVersionIndex + 1]
+      : null;
 
   useEffect(() => {
     setWebsiteViewMode("preview");
@@ -546,28 +750,63 @@ function GenerationWorkspacePanel({
           <div className="mt-2 flex items-center gap-2 text-xs text-ink-500">
             <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(result?.status || "idle")}`} />
             <span>{statusLabel(result?.status || "idle")}</span>
-            {result ? <span className="rounded-pill border border-line1 bg-sunken px-2 py-0.5">v{result.versionNumber}</span> : null}
+            {result ? (
+              <span className="inline-flex items-center gap-1 rounded-pill border border-line1 bg-sunken p-0.5">
+                <button
+                  type="button"
+                  disabled={!previousVersion}
+                  onClick={() => previousVersion && onSelectVersion(previousVersion.viewId)}
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-ink-400 transition hover:bg-surface hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
+                  aria-label="上一版"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="px-1">v{result.versionNumber}</span>
+                <button
+                  type="button"
+                  disabled={!nextVersion}
+                  onClick={() => nextVersion && onSelectVersion(nextVersion.viewId)}
+                  className="flex h-5 w-5 items-center justify-center rounded-full text-ink-400 transition hover:bg-surface hover:text-ink-900 disabled:pointer-events-none disabled:opacity-30"
+                  aria-label="下一版"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ) : null}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-500 transition hover:bg-hover hover:text-ink-900"
-          aria-label="關閉生成結果"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {result && (result.status === "queued" || result.status === "processing") ? (
+            <button
+              type="button"
+              onClick={() => onCancel(result)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line1 bg-surface px-2.5 text-xs font-medium text-ink-700 shadow-xs transition hover:-translate-y-px hover:border-line2 hover:bg-hover"
+              aria-label="暫停生成"
+            >
+              <X className="h-3.5 w-3.5" />
+              暫停
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-md text-ink-500 transition hover:bg-hover hover:text-ink-900"
+            aria-label="關閉生成結果"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {versions.length > 1 ? (
         <div className="scrollbar-none flex shrink-0 gap-2 overflow-x-auto px-5 pb-3">
           {versions.map((version) => (
             <button
-              key={version.messageId}
+              key={version.viewId}
               type="button"
-              onClick={() => onSelectVersion(version.messageId)}
+              onClick={() => onSelectVersion(version.viewId)}
               className={`rounded-pill border px-3 py-1.5 text-xs transition ${
-                version.messageId === result?.messageId
+                version.viewId === result?.viewId
                   ? "border-brand-500 bg-brand-500 text-[var(--on-brand)]"
                   : "border-line1 bg-surface text-ink-500 hover:border-line2 hover:bg-hover"
               }`}
@@ -748,7 +987,7 @@ function GenerationWorkspacePanel({
           </div>
         ) : (
           <div className="space-y-4">
-            {isWorking ? (
+            {isWorking && isImageResult ? (
               <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700">
                 <div className="flex items-center gap-2 font-medium">
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -758,13 +997,22 @@ function GenerationWorkspacePanel({
               </div>
             ) : null}
 
+            {isWorking && isTextResult ? (
+              <div className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-700">
+                <div className="flex items-center gap-2 font-medium">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  正在產生文字內容
+                </div>
+                <div className="mt-1 text-xs text-brand-600">內容會逐段顯示在下方，請稍候。</div>
+              </div>
+            ) : null}
+
             {isBusy && !isWorking ? (
               <div className="rounded-lg border border-line1 bg-sunken px-4 py-3 text-sm text-ink-500">
                 <div className="flex items-center gap-2 font-medium">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   正在送出修正版
                 </div>
-                <div className="mt-1 text-xs text-ink-500">如果這輪是修改圖像，後端會直接接 Banana 生成新版。</div>
               </div>
             ) : null}
 
@@ -784,44 +1032,68 @@ function GenerationWorkspacePanel({
               </button>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              {images.map((image, index) => (
-                <div
-                  key={image.id}
-                  className="group relative overflow-hidden rounded-lg border border-line1 bg-sunken shadow-sm transition-[transform,box-shadow,border] duration-240 ease-smooth hover:-translate-y-px hover:border-line2 hover:shadow-md"
-                >
-                  <a href={image.url} target="_blank" rel="noreferrer" className="block">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.url} alt={image.label} className="animate-reveal-image aspect-square w-full object-cover transition-transform duration-240 ease-out group-hover:scale-[1.02]" />
-                  </a>
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/65 to-transparent px-3 pb-3 pt-10 text-white opacity-0 transition group-hover:opacity-100">
-                    <span className="truncate text-xs font-medium">{image.label || `圖像 ${index + 1}`}</span>
-                    <a
-                      href={image.url}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface/90 text-ink-700 shadow-sm backdrop-blur transition hover:bg-surface"
-                      aria-label="下載圖像"
-                    >
-                      <Download className="h-3.5 w-3.5" />
+            {isImageResult ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {images.map((image, index) => (
+                  <div
+                    key={image.id}
+                    className="group relative overflow-hidden rounded-lg border border-line1 bg-sunken shadow-sm transition-[transform,box-shadow,border] duration-240 ease-smooth hover:-translate-y-px hover:border-line2 hover:shadow-md"
+                  >
+                    <a href={image.url} target="_blank" rel="noreferrer" className="block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={image.url} alt={image.label} className="animate-reveal-image aspect-square w-full object-cover transition-transform duration-240 ease-out group-hover:scale-[1.02]" />
                     </a>
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/65 to-transparent px-3 pb-3 pt-10 text-white opacity-0 transition group-hover:opacity-100">
+                      <span className="truncate text-xs font-medium">{image.label || `圖像 ${index + 1}`}</span>
+                      <a
+                        href={image.url}
+                        download
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface/90 text-ink-700 shadow-sm backdrop-blur transition hover:bg-surface"
+                        aria-label="下載圖像"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
 
-              {Array.from({ length: pendingSlots }).map((_, index) => (
-                <div
-                  key={`pending-${index}`}
-                  className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-line2 bg-sunken text-xs text-ink-400"
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span>等待圖像 {index + 1}</span>
+                {Array.from({ length: pendingSlots }).map((_, index) => (
+                  <div
+                    key={`pending-${index}`}
+                    className="flex aspect-square items-center justify-center rounded-lg border border-dashed border-line2 bg-sunken text-xs text-ink-400"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>等待圖像 {index + 1}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : null}
+
+            {isTextResult && textItems.length === 0 ? (
+              <div className="space-y-3">
+                {Array.from({ length: Math.max(1, pendingSlots) }).map((_, index) => (
+                  <div
+                    key={`text-pending-${index}`}
+                    className="rounded-lg border border-dashed border-line2 bg-sunken p-4 shadow-inner"
+                  >
+                    <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-ink-500">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>等待內容 {index + 1}</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="h-3 w-11/12 animate-pulse rounded bg-line1" />
+                      <div className="h-3 w-10/12 animate-pulse rounded bg-line1" />
+                      <div className="h-3 w-9/12 animate-pulse rounded bg-line1" />
+                      <div className="h-3 w-8/12 animate-pulse rounded bg-line1" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {textItems.length > 0 ? (
               <div className="space-y-3">
@@ -831,7 +1103,7 @@ function GenerationWorkspacePanel({
                     className="rounded-lg border border-line1 bg-surface p-4 text-sm leading-7 text-ink-700 shadow-sm"
                   >
                     <div className="mb-2 text-xs font-semibold text-ink-500">{item.label}</div>
-                    <div className="whitespace-pre-wrap">{item.content}</div>
+                    <MarkdownText text={item.content} />
                   </article>
                 ))}
               </div>
@@ -865,6 +1137,7 @@ export default function GeneratePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeConversationId = searchParams.get("conversationId");
+  const historyRequested = searchParams.get("history") === "1";
   const [input, setInput] = useState("");
   const [pendingQuickReply, setPendingQuickReply] = useState<QuickAction | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -876,13 +1149,18 @@ export default function GeneratePage() {
   const [resultPanelWidth, setResultPanelWidth] = useState(560);
   const [chatScrollSignal, setChatScrollSignal] = useState(0);
   const [isCreatingProjectOrder, setIsCreatingProjectOrder] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<ConversationHistoryItem[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const submitLockRef = useRef(false);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
   const latestGenerationRef = useRef<string | null>(null);
+  const [regenerationStartedAt, setRegenerationStartedAt] = useState<number | null>(null);
   const latestTextArtifactRef = useRef<string | null>(null);
   const {
     messages,
+    activeConversation,
     activeDesignTask,
     designTaskStarters,
     isSending,
@@ -892,6 +1170,9 @@ export default function GeneratePage() {
     createDesignTask,
     generateDesignTask,
     sendMessage,
+    switchActiveBranch,
+    cancelMessage,
+    stopActiveMessage,
   } = useConversations(activeConversationId);
 
   const visiblePromptChips = useMemo(() => {
@@ -915,11 +1196,11 @@ export default function GeneratePage() {
   const hasMessages = messages.length > 0;
   const busy = isSending || isSubmitting;
   const showChatShell = hasMessages || busy;
+  const conversationTitle = activeConversation?.title || (activeConversationId ? "未命名對話" : "新對話");
   const generationResults = useMemo(
     () =>
       messages
-        .map(generationResultFromMessage)
-        .filter((result): result is GenerationResultView => Boolean(result))
+        .flatMap(generationResultsFromMessage)
         .reverse(),
     [messages],
   );
@@ -930,13 +1211,20 @@ export default function GeneratePage() {
         .filter((artifact): artifact is TextArtifactView => Boolean(artifact)),
     [messages],
   );
+  // The "latest" generation is the newest one in the list. We fall back to
+  // this whenever no pin is set; we do NOT fall back to it when a pin IS set
+  // but doesn't match — that's how moreu-web avoids the "jumps back to newest"
+  // bug when a user clicks an older artifact card mid-regen.
+  const latestGenerationResult = generationResults[0] ?? null;
   const activeGenerationResult = useMemo(() => {
     if (selectedGenerationMessageId) {
-      const selected = generationResults.find((result) => result.messageId === selectedGenerationMessageId);
-      if (selected) return selected;
+      return (
+        generationResults.find((result) => result.messageId === selectedGenerationMessageId) ||
+        latestGenerationResult
+      );
     }
-    return generationResults[0] ?? null;
-  }, [generationResults, selectedGenerationMessageId]);
+    return latestGenerationResult;
+  }, [generationResults, latestGenerationResult, selectedGenerationMessageId]);
   const activeTextArtifact = useMemo(() => {
     if (selectedTextArtifactId) {
       const selected = textArtifacts.find((artifact) => artifact.messageId === selectedTextArtifactId);
@@ -944,6 +1232,21 @@ export default function GeneratePage() {
     }
     return textArtifacts[textArtifacts.length - 1] ?? null;
   }, [selectedTextArtifactId, textArtifacts]);
+  const activeCancellableMessageId = useMemo(() => {
+    const runningGeneration = generationResults.find((result) => result.status === "queued" || result.status === "processing");
+    if (runningGeneration) return runningGeneration.messageId;
+    const runningAssistant = [...messages].reverse().find((message) => {
+      if (message.role !== "assistant" || !message.isStreaming) return false;
+      const status = metadataStatus(message.metadata);
+      return status !== "completed" && status !== "failed" && status !== "cancelled";
+    });
+    return runningAssistant?.id ?? null;
+  }, [generationResults, messages]);
+  const handleStopActiveMessage = useCallback(() => {
+    submitLockRef.current = false;
+    setIsSubmitting(false);
+    void stopActiveMessage(activeConversationId, activeCancellableMessageId);
+  }, [activeCancellableMessageId, activeConversationId, stopActiveMessage]);
 
   async function createProjectOrderFromResult(result: GenerationResultView) {
     const websiteItem = result.websiteItems[0];
@@ -1039,12 +1342,190 @@ export default function GeneratePage() {
   }
   const activeGenerationVersions = useMemo(() => {
     if (!activeGenerationResult) return generationResults;
-    const threadId = activeGenerationResult.generationThreadId || activeGenerationResult.messageId;
-    return generationResults.filter((result) => {
-      const resultThreadId = result.generationThreadId || result.messageId;
-      return resultThreadId === threadId;
+    // Append-only: each generation_result message is one version. Cluster the
+    // panel&apos;s version switcher by generationThreadId across messages so v1/v2/v3
+    // line up regardless of which message currently holds the latest output.
+    const threadId = generationThreadKey(activeGenerationResult);
+    const sameThread = generationResults.filter((result) => {
+      return generationThreadKey(result) === threadId;
     });
+    // Display oldest version first so v1 → v2 → v3 reads left-to-right.
+    return sameThread.slice().sort((a, b) => a.versionNumber - b.versionNumber);
   }, [activeGenerationResult, generationResults]);
+  const generationResultForMessage = useCallback((message: ChatMessage) => {
+    if (message.messageType !== "generation_result") return null;
+    return generationResults.find((result) => result.messageId === message.id) ?? null;
+  }, [generationResults]);
+  const artifactSummaryForMessage = useCallback((message: ChatMessage): GenerationArtifactSummary | null => {
+    const result = generationResultForMessage(message);
+    if (!result) return null;
+    const kind: GenerationArtifactSummary["kind"] =
+      result.domain === "web" || result.websiteItems.length > 0
+        ? "web"
+        : result.domain === "image" || result.images.length > 0
+          ? "image"
+          : "text";
+    const title =
+      result.websiteItems[0]?.label ||
+      result.textItems[0]?.label ||
+      result.images[0]?.label ||
+      result.templateLabel ||
+      "生成結果";
+    const subtitle =
+      kind === "web"
+        ? result.websiteItems[0]?.openUrl || (result.templateLabel ?? null)
+        : kind === "text"
+          ? result.textItems[0]?.content?.slice(0, 80) || null
+          : result.images.length > 0
+            ? `${result.images.length} 張圖像`
+            : null;
+    const thumbnailUrl = kind === "image" ? result.images[0]?.url ?? null : null;
+    const isActive =
+      isResultPanelOpen &&
+      workspaceMode === "generation" &&
+      activeGenerationResult?.messageId === message.id;
+    return {
+      kind,
+      title,
+      subtitle,
+      thumbnailUrl,
+      versionLabel: result.versionNumber ? `v${result.versionNumber}` : null,
+      status: result.status,
+      isActive,
+    };
+  }, [activeGenerationResult, generationResultForMessage, isResultPanelOpen, workspaceMode]);
+  const handleOpenGenerationResult = useCallback((message: ChatMessage) => {
+    setSelectedGenerationMessageId(message.id);
+    setWorkspaceMode("generation");
+    setIsResultPanelOpen(true);
+  }, []);
+  const versionsForGenerationResult = useCallback((result: GenerationResultView | null) => {
+    if (!result) return [];
+    const threadId = generationThreadKey(result);
+    return generationResults
+      .filter((item) => generationThreadKey(item) === threadId)
+      .slice()
+      .sort((a, b) => a.versionNumber - b.versionNumber);
+  }, [generationResults]);
+  const selectedResultForThread = useCallback((fallbackResult: GenerationResultView | null) => {
+    if (!fallbackResult) return null;
+    const versions = versionsForGenerationResult(fallbackResult);
+    const selected = selectedGenerationMessageId
+      ? versions.find((version) => version.viewId === selectedGenerationMessageId || version.messageId === selectedGenerationMessageId)
+      : null;
+    return selected ?? fallbackResult;
+  }, [selectedGenerationMessageId, versionsForGenerationResult]);
+  const versionInfoForMessage = useCallback((message: ChatMessage) => {
+    const fallbackResult = generationResultForMessage(message);
+    const result = selectedResultForThread(fallbackResult);
+    const versions = fallbackResult ? versionsForGenerationResult(fallbackResult) : [];
+    if (fallbackResult && result && versions.length > 1) {
+      const index = versions.findIndex((version) => version.viewId === result.viewId);
+      return {
+        label: `v${result.versionNumber}`,
+        canPrevious: index > 0,
+        canNext: index >= 0 && index < versions.length - 1,
+      };
+    }
+    const siblingCount = message.siblingCount ?? 0;
+    const siblingIndex = message.siblingIndex ?? 0;
+    if (siblingCount > 1) {
+      return {
+        label: `${siblingIndex + 1}/${siblingCount}`,
+        canPrevious: siblingIndex > 0,
+        canNext: siblingIndex < siblingCount - 1,
+      };
+    }
+    return null;
+  }, [generationResultForMessage, selectedResultForThread, versionsForGenerationResult]);
+  const selectAdjacentMessageVersion = useCallback((message: ChatMessage, direction: -1 | 1) => {
+    const fallbackResult = generationResultForMessage(message);
+    const result = selectedResultForThread(fallbackResult);
+    const versions = fallbackResult ? versionsForGenerationResult(fallbackResult) : [];
+    const index = result ? versions.findIndex((version) => version.viewId === result.viewId) : -1;
+    const next = index >= 0 ? versions[index + direction] : null;
+    if (next) {
+      setSelectedGenerationMessageId(next.messageId);
+      setWorkspaceMode("generation");
+      setIsResultPanelOpen(true);
+      return;
+    }
+    const siblingIds = message.siblingIds ?? [];
+    const siblingIndex = message.siblingIndex ?? -1;
+    const siblingId = siblingIndex >= 0 ? siblingIds[siblingIndex + direction] : null;
+    if (siblingId && activeConversationId) {
+      void switchActiveBranch(activeConversationId, siblingId);
+    }
+  }, [activeConversationId, generationResultForMessage, selectedResultForThread, switchActiveBranch, versionsForGenerationResult]);
+  // Keep chat readable: one artifact bubble per generation thread. The right
+  // workspace owns version browsing, while the chat keeps the latest/running
+  // state for that thread instead of appending a new bubble for every version.
+  // In-place version collapse: same-thread generation_result messages occupy
+  // ONE slot in the chat (the position of the EARLIEST version in that thread),
+  // so regenerating B doesn't append B2 after C — the slot stays where B was.
+  // The pin (selectedGenerationMessageId) decides which version's content shows
+  // inside that slot; if nothing's pinned, the latest version wins.
+  const visibleMessages = useMemo(() => {
+    const threadToPickedId = new Map<string, string>();
+    const threadToSlotMessageId = new Map<string, string>();
+    const messageIdToThread = new Map<string, string>();
+
+    const resultByMessageId = new Map<string, GenerationResultView>();
+    for (const result of generationResults) {
+      resultByMessageId.set(result.messageId, result);
+    }
+
+    const threadKeyForResult = (result: GenerationResultView): string => {
+      if (result.generationThreadId) return result.generationThreadId;
+      if (result.sourceMessageId) {
+        const sourceResult = resultByMessageId.get(result.sourceMessageId);
+        if (sourceResult) return generationThreadKey(sourceResult);
+      }
+      if (result.messageId.startsWith("local-") && result.taskId) {
+        const existingResult = generationResults.find((item) => {
+          if (item.messageId === result.messageId) return false;
+          return item.taskId === result.taskId && !item.messageId.startsWith("local-");
+        });
+        if (existingResult) return generationThreadKey(existingResult);
+      }
+      return generationThreadKey(result);
+    };
+
+    const threadResults = new Map<string, GenerationResultView[]>();
+    for (const message of messages) {
+      const result = resultByMessageId.get(message.id);
+      if (!result) continue;
+      const key = threadKeyForResult(result);
+      messageIdToThread.set(message.id, key);
+      const list = threadResults.get(key) ?? [];
+      list.push(result);
+      threadResults.set(key, list);
+      if (!threadToSlotMessageId.has(key)) threadToSlotMessageId.set(key, message.id);
+    }
+
+    for (const [key, list] of threadResults) {
+      const sorted = list.slice().sort((a, b) => a.versionNumber - b.versionNumber);
+      const pinned = selectedGenerationMessageId
+        ? sorted.find((r) => r.messageId === selectedGenerationMessageId)
+        : null;
+      const picked = pinned ?? sorted[sorted.length - 1];
+      if (picked) threadToPickedId.set(key, picked.messageId);
+    }
+
+    return messages.flatMap((message) => {
+      if (message.messageType !== "generation_result") return [message];
+      const key = messageIdToThread.get(message.id);
+      if (!key) return [message];
+      // Only the first message in the thread remains as the chat slot. Later
+      // versions/pending placeholders are represented by swapping this slot's
+      // rendered data, never by appending another bubble.
+      if (threadToSlotMessageId.get(key) !== message.id) return [];
+      const pickedId = threadToPickedId.get(key);
+      if (!pickedId || pickedId === message.id) return [message];
+      const picked = messages.find((m) => m.id === pickedId);
+      return [picked ?? message];
+    });
+  }, [generationResults, messages, selectedGenerationMessageId]);
 
   const refreshUsage = useCallback(async () => {
     const res = await fetch("/api/usage/current", {
@@ -1054,6 +1535,19 @@ export default function GeneratePage() {
     if (!res.ok) return;
     const payload = ("data" in json ? json.data : json) as UsagePayload | undefined;
     setUsage(payload ?? null);
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    setIsHistoryLoading(true);
+    try {
+      const res = await fetch("/api/conversations?page=1&limit=40", { cache: "no-store" });
+      const json = (await res.json().catch(() => ({}))) as { data?: ConversationHistoryItem[] };
+      setHistoryItems(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setHistoryItems([]);
+    } finally {
+      setIsHistoryLoading(false);
+    }
   }, []);
 
   const withSubmitLock = useCallback(
@@ -1077,15 +1571,64 @@ export default function GeneratePage() {
   }, [refreshUsage]);
 
   useEffect(() => {
-    const latest = generationResults[0];
+    void loadHistory();
+  }, [activeConversationId, loadHistory]);
+
+  useEffect(() => {
+    const onRefresh = () => void loadHistory();
+    window.addEventListener("gtl:conversations-refresh", onRefresh);
+    return () => window.removeEventListener("gtl:conversations-refresh", onRefresh);
+  }, [loadHistory]);
+
+  useEffect(() => {
+    if (historyRequested) setHistoryOpen(true);
+  }, [historyRequested]);
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    router.replace(activeConversationId ? `/generate?conversationId=${activeConversationId}` : "/generate");
+  }, [activeConversationId, router]);
+
+  useEffect(() => {
+    const latest = latestGenerationResult;
     if (!latest) return;
-    if (latestGenerationRef.current !== latest.messageId) {
+    // Initial appearance of a generation: pin to it once, open the panel.
+    // This does NOT run again for subsequent regens — those go through the
+    // regenerationStartedAt effect below.
+    const isNewLatest = latestGenerationRef.current !== latest.messageId;
+    if (isNewLatest) {
       latestGenerationRef.current = latest.messageId;
-      setSelectedGenerationMessageId(latest.messageId);
-      setWorkspaceMode("generation");
+      const userPinned =
+        selectedGenerationMessageId &&
+        generationResults.some(
+          (result) => result.messageId === selectedGenerationMessageId,
+        );
+      if (!userPinned) {
+        setSelectedGenerationMessageId(latest.messageId);
+        setWorkspaceMode("generation");
+      }
     }
     setIsResultPanelOpen(true);
-  }, [generationResults]);
+  }, [generationResults, latestGenerationResult, selectedGenerationMessageId]);
+
+  // Regeneration pin: once the user triggers a regen, we set regenerationStartedAt.
+  // We pin to the newest generation message ONLY if its updatedAt > regenerationStartedAt,
+  // i.e. it's the message produced by this regen — never an older one. When the new
+  // message reaches a terminal status, we clear the flag.
+  useEffect(() => {
+    if (!latestGenerationResult || regenerationStartedAt === null) return;
+    const resultMessage = messages.find((m) => m.id === latestGenerationResult.messageId);
+    const updatedRaw = (resultMessage as ChatMessage & { updatedAt?: string } | undefined)?.updatedAt
+      ?? resultMessage?.createdAt;
+    const resultUpdatedAt = updatedRaw ? new Date(updatedRaw).getTime() : 0;
+    if (!Number.isFinite(resultUpdatedAt)) return;
+    if (resultUpdatedAt < regenerationStartedAt - 500) return;
+    setSelectedGenerationMessageId(latestGenerationResult.messageId);
+    const status = latestGenerationResult.status;
+    if (status === "completed" || status === "failed" || status === "error") {
+      setRegenerationStartedAt(null);
+    }
+  }, [latestGenerationResult, messages, regenerationStartedAt]);
 
   useEffect(() => {
     const latest = textArtifacts[textArtifacts.length - 1];
@@ -1132,6 +1675,24 @@ export default function GeneratePage() {
       setInput("");
       setChatScrollSignal((current) => current + 1);
       const quickReply = pendingQuickReply;
+      const latestActionSourceId =
+        quickReply && !quickReply.sourceMessageId
+          ? [...messages]
+              .reverse()
+              .find((message) => {
+                if (message.role !== "assistant") return false;
+                const actions = Array.isArray(message.quickActions)
+                  ? message.quickActions
+                  : Array.isArray(message.metadata?.quickActions)
+                    ? (message.metadata.quickActions as QuickAction[])
+                    : [];
+                return actions.length > 0;
+              })?.id
+          : null;
+      const normalizedQuickReply =
+        quickReply && latestActionSourceId
+          ? { ...quickReply, sourceMessageId: latestActionSourceId }
+          : quickReply;
       setPendingQuickReply(null);
       const conversationId = await ensureConversation(content.slice(0, 32));
       await sendMessage(conversationId, {
@@ -1141,17 +1702,7 @@ export default function GeneratePage() {
         metadata: {
           source: "web",
           clientVersion: "src-generate",
-          ...(quickReply ? { quickReply } : {}),
-          ...(activeGenerationResult
-            ? {
-                targetGeneration: {
-                  messageId: activeGenerationResult.messageId,
-                  taskId: activeGenerationResult.taskId,
-                  generationThreadId: activeGenerationResult.generationThreadId,
-                  versionNumber: activeGenerationResult.versionNumber,
-                },
-              }
-            : {}),
+          ...(normalizedQuickReply ? { quickReply: normalizedQuickReply } : {}),
         },
       });
       setChatScrollSignal((current) => current + 1);
@@ -1187,6 +1738,11 @@ export default function GeneratePage() {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }
 
+  function handleInputChange(value: string) {
+    setInput(value);
+    setPendingQuickReply(null);
+  }
+
   async function handleQuickAction(action: QuickAction) {
     await withSubmitLock(async () => {
       const value = action.value || action.label;
@@ -1205,12 +1761,18 @@ export default function GeneratePage() {
         fillInput(value, action);
         return;
       }
-      if (isGenerateAction(action) && action.taskId) {
+      if (isRegenerateAction(action) && action.taskId) {
         setIsResultPanelOpen(true);
+        setRegenerationStartedAt(Date.now());
         const conversationId = await ensureConversation();
+        const sourceResult = action.sourceMessageId
+          ? generationResults.find((result) => result.messageId === action.sourceMessageId)
+          : null;
         const result = await generateDesignTask(conversationId, action.taskId, {
           sourceMessageId: action.sourceMessageId || activeGenerationResult?.messageId || null,
+          sourceVersionNumber: sourceResult?.versionNumber || activeGenerationResult?.versionNumber || null,
           instruction: value,
+          showInstructionBubble: false,
         });
         const messageId = result?.message?.id;
         if (messageId) setSelectedGenerationMessageId(messageId);
@@ -1229,11 +1791,140 @@ export default function GeneratePage() {
     });
   }
 
+  function handleCancelMessage(message: ChatMessage) {
+    void stopActiveMessage(activeConversationId, message.id);
+  }
+
+  function handleRegenerateMessage(message: ChatMessage) {
+    if (message.messageType !== "generation_result") return;
+    const actions = Array.isArray(message.quickActions)
+      ? message.quickActions
+      : Array.isArray(message.metadata?.quickActions)
+        ? (message.metadata.quickActions as QuickAction[])
+        : [];
+    const result = generationResultForMessage(message);
+    const taskId = result?.taskId || message.designTaskId || activeDesignTask?.id || undefined;
+    const regenerateAction = actions.find(isGenerateAction) ?? {
+      type: "regenerate_design",
+      label: "再生一版",
+      value: "再生一版，請沿用上一版內容與目前已對齊資料，重新產生一版。",
+    };
+    if (!taskId) {
+      fillInput(regenerateAction.value || regenerateAction.label, {
+        ...regenerateAction,
+        sourceMessageId: message.id,
+      });
+      return;
+    }
+    void withSubmitLock(async () => {
+      setIsResultPanelOpen(true);
+      setWorkspaceMode("generation");
+      setRegenerationStartedAt(Date.now());
+      const conversationId = await ensureConversation();
+      const generated = await generateDesignTask(conversationId, taskId, {
+        sourceMessageId: message.id,
+        sourceVersionNumber: result?.versionNumber ?? null,
+        instruction: regenerateAction.value || regenerateAction.label,
+        showInstructionBubble: false,
+      });
+      const messageId = generated?.message?.id;
+      if (messageId) setSelectedGenerationMessageId(messageId);
+    });
+  }
+
+  async function handleEditedMessage(message: ChatMessage, content: string) {
+    await withSubmitLock(async () => {
+      const conversationId = await ensureConversation(content.slice(0, 32));
+      const targetResult = activeGenerationResult ?? latestGenerationResult;
+      const targetTaskId = targetResult?.taskId || message.designTaskId || activeDesignTask?.id || null;
+      // Paid regeneration only when the edited message belongs to the target
+      // generation's lineage (its instruction message or an ancestor on its
+      // branch path). Unrelated edits go through the plain edit path.
+      const shouldRegenerate = Boolean(
+        targetResult?.messageId &&
+          targetTaskId &&
+          isEditWithinGenerationLineage({
+            editedMessageId: message.id,
+            generation: targetResult,
+            messages,
+          }),
+      );
+
+      if (shouldRegenerate) {
+        setIsResultPanelOpen(true);
+        setWorkspaceMode("generation");
+        setRegenerationStartedAt(Date.now());
+      }
+
+      const result = await sendMessage(conversationId, {
+        content,
+        designTaskIds: targetTaskId ? [targetTaskId] : activeDesignTask ? [activeDesignTask.id] : [],
+        metadata: {
+          source: "web",
+          clientVersion: "src-generate",
+          editOfMessageId: message.id,
+          ...(shouldRegenerate && targetResult
+            ? {
+                quickReply: {
+                  type: "regenerate_design",
+                  action: "proceed_generate",
+                  label: "套用編輯並重生",
+                  value: content,
+                  sourceMessageId: targetResult.messageId,
+                  taskId: targetTaskId,
+                },
+                targetGeneration: {
+                  messageId: targetResult.messageId,
+                  taskId: targetResult.taskId,
+                  generationThreadId: targetResult.generationThreadId,
+                  versionNumber: targetResult.versionNumber,
+                },
+              }
+            : {}),
+        },
+      });
+
+      const generatedMessageId =
+        result?.assistantMessage?.messageType === "generation_result" ? result.assistantMessage.id : null;
+      if (generatedMessageId) {
+        setSelectedGenerationMessageId(generatedMessageId);
+      }
+    });
+    return true;
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas text-ink-900">
       <section className="relative flex min-h-0 flex-1 flex-col">
         {showChatShell ? (
           <>
+            <div className="relative z-20 shrink-0 px-4 pt-4">
+              <div className="mx-auto flex w-full max-w-5xl items-center gap-3">
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryOpen((open) => !open)}
+                    className="inline-flex max-w-[min(520px,calc(100vw-180px))] items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm font-semibold text-ink-800 transition duration-120 ease-smooth hover:bg-hover"
+                    aria-expanded={historyOpen}
+                    aria-haspopup="dialog"
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-ink-500" />
+                    <span className="truncate">{conversationTitle}</span>
+                    <ChevronDown className={["h-4 w-4 shrink-0 text-ink-400 transition-transform duration-120", historyOpen ? "rotate-180" : ""].join(" ")} />
+                  </button>
+                  <ConversationHistoryMenu
+                    open={historyOpen}
+                    items={historyItems}
+                    activeConversationId={activeConversationId}
+                    loading={isHistoryLoading}
+                    onClose={closeHistory}
+                    onSelect={(id) => {
+                      router.push(`/generate?conversationId=${id}`);
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
             <div className="relative flex min-h-0 flex-1 overflow-hidden px-3 pt-3 md:px-4 md:pt-4">
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {(generationResults.length > 0 || textArtifacts.length > 0) && !isResultPanelOpen ? (
@@ -1249,7 +1940,7 @@ export default function GeneratePage() {
                   </div>
                 ) : null}
                 <ConversationInterface
-                  messages={messages}
+                  messages={visibleMessages}
                   scrollSignal={chatScrollSignal}
                   onQuickAction={(action) => void handleQuickAction(action)}
                   onFillInput={fillInput}
@@ -1258,6 +1949,14 @@ export default function GeneratePage() {
                     setWorkspaceMode("text");
                     setIsResultPanelOpen(true);
                   }}
+                  onOpenGenerationResult={handleOpenGenerationResult}
+                  artifactSummaryForMessage={artifactSummaryForMessage}
+                  onEditMessage={(message, content) => handleEditedMessage(message, content)}
+                  onCancelMessage={handleCancelMessage}
+                  onRegenerateMessage={handleRegenerateMessage}
+                  versionInfoForMessage={versionInfoForMessage}
+                  onPreviousVersion={(message) => selectAdjacentMessageVersion(message, -1)}
+                  onNextVersion={(message) => selectAdjacentMessageVersion(message, 1)}
                   onUploadFiles={(files, action) => {
                     void withSubmitLock(async () => {
                       const value = action.value || action.label;
@@ -1286,8 +1985,9 @@ export default function GeneratePage() {
                     <AIChatInput
                       ref={inputRef}
                       value={input}
-                      onChange={setInput}
+                      onChange={handleInputChange}
                       onSend={(value, files) => void handleSend(value, files)}
+                      onStop={handleStopActiveMessage}
                       loading={busy}
                     />
                     <CreditFooter usage={usage} error={error} />
@@ -1332,6 +2032,10 @@ export default function GeneratePage() {
                       onClose={() => setIsResultPanelOpen(false)}
                       onQuickAction={(action) => void handleQuickAction(action)}
                       onCreateProjectOrder={(result) => void createProjectOrderFromResult(result)}
+                      onCancel={(result) => {
+                        if (!activeConversationId) return;
+                        void cancelMessage(activeConversationId, result.messageId);
+                      }}
                     />
                   )}
                 </div>
@@ -1341,10 +2045,12 @@ export default function GeneratePage() {
         ) : (
           <div className="scrollbar-none min-h-0 flex-1 overflow-auto pb-10">
             {/* Status row (constrained to max content width) */}
-            <div className="mx-auto mb-2 flex min-h-5 w-full max-w-3xl items-center justify-end gap-3 px-5 pt-6">
-              {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
-              {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
-            </div>
+            {isLoadingMessages || error ? (
+              <div className="mx-auto flex min-h-5 w-full max-w-3xl items-center justify-end gap-3 px-5 py-2">
+                {isLoadingMessages ? <div className="text-xs text-ink-400">載入中</div> : null}
+                {error ? <div className="max-w-[320px] truncate text-xs text-err-500">{error}</div> : null}
+              </div>
+            ) : null}
 
             {/* Full-bleed hero — gradient extends edge-to-edge of main, fades into canvas */}
             <HeroBreathing
@@ -1354,28 +2060,27 @@ export default function GeneratePage() {
               <AIChatInput
                 ref={inputRef}
                 value={input}
-                onChange={setInput}
+                onChange={handleInputChange}
                 onSend={(value, files) => void handleSend(value, files)}
+                onStop={handleStopActiveMessage}
                 loading={busy}
                 placeholder="描述你想做的圖、文案或網頁..."
               />
-            </HeroBreathing>
-
-            {/* Constrained content below the hero */}
-            <div className="mx-auto w-full max-w-4xl px-5">
-              {/* G³ default prompt chips (spec §4.4) — render below hero */}
               <PromptChips
                 items={visiblePromptChips}
                 onSelect={(chip) => {
                   setInput(chip.prompt);
+                  setPendingQuickReply(null);
                   inputRef.current?.focus();
                 }}
-                className="-mt-4"
+                className="mt-5"
               />
+              <CreditFooter usage={usage} error={error} />
+            </HeroBreathing>
 
+            {/* Constrained content below the hero */}
+            <div className="mx-auto w-full max-w-4xl px-5">
               <div className="mx-auto w-full max-w-3xl">
-                <CreditFooter usage={usage} error={error} />
-
                 <div className="mt-8 flex items-end justify-between gap-3">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-400">Start here</div>
